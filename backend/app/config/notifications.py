@@ -2,7 +2,6 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
-
 @dataclass
 class NotificationSettings:
     notifications_enabled: bool = True
@@ -23,7 +22,6 @@ class NotificationSettings:
             block_alert_window_minutes=int(os.getenv("BLOCK_ALERT_WINDOW_MINUTES", "10")),
             notification_webhook_url=os.getenv("NOTIFICATION_WEBHOOK_URL"),
         )
-
 
 def get_notification_settings() -> NotificationSettings:
     return NotificationSettings.from_env()
