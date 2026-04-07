@@ -73,7 +73,7 @@ const PolicyStep: React.FC<Props> = ({
     </div>
     <div style={{ display: "grid", gap: "12px" }}>
       <div>
-        <label style={labelStyle}>Frequency limit (calls per minute)</label>
+        <label style={labelStyle}>Frequency limit (max calls per session)</label>
         <input
           style={inputStyle}
           type="number"
