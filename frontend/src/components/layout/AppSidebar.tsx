@@ -1,7 +1,26 @@
-import { Box, HStack, Text, VStack } from "@chakra-ui/react";
+import { Box, Text, VStack } from "@chakra-ui/react";
+import {
+  FiBell,
+  FiClipboard,
+  FiGrid,
+  FiLayers,
+  FiSearch,
+  FiSettings,
+  FiTool,
+} from "react-icons/fi";
 import { useLocation, useNavigate } from "react-router-dom";
 import { navItems } from "../../lib/routes";
 import { NavItem } from "../ui/NavItem";
+
+const navIconMap = {
+  "/dashboard": FiGrid,
+  "/builder": FiTool,
+  "/sessions": FiLayers,
+  "/approvals": FiClipboard,
+  "/investigation": FiSearch,
+  "/notifications": FiBell,
+  "/tools": FiSettings,
+};
 
 export const AppSidebar = () => {
   const navigate = useNavigate();
@@ -34,6 +53,7 @@ export const AppSidebar = () => {
 
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
+          const ItemIcon = navIconMap[item.path as keyof typeof navIconMap] ?? FiGrid;
           return (
             <Box key={item.path}>
               <NavItem
@@ -42,15 +62,12 @@ export const AppSidebar = () => {
                 isActive={isActive}
                 onClick={() => navigate(item.path)}
                 icon={
-                  <HStack spacing={1} display={{ base: "none", lg: "flex" }}>
-                    <Box w="7px" h="7px" borderRadius="full" bg={isActive ? "brand.500" : "slate.300"} />
-                    <Box
-                      w="7px"
-                      h="7px"
-                      borderRadius="full"
-                      bg={isActive ? "brand.300" : "slate.200"}
-                    />
-                  </HStack>
+                  <Box
+                    as={ItemIcon as any}
+                    boxSize={25}
+                    color={isActive ? "brand.200" : "text.muted"}
+                    display={{ base: "none", lg: "inline-flex" }}
+                  />
                 }
               />
             </Box>
