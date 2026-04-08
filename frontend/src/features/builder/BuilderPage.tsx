@@ -18,7 +18,7 @@ const initialDraft: BuilderDraft = {
     name: "",
     description: "",
     purpose: "",
-    model: "gemini-1.5-flash",
+    model: "gemini-2.5-flash",
   },
   selectedToolIds: [],
   policy: {

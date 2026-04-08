@@ -24,8 +24,7 @@ export const builderSteps: BuilderStep[] = [
 ];
 
 export const modelOptions = [
+  "gemini-2.5-flash",
   "gemini-1.5-flash",
   "gemini-1.5-pro",
-  "gpt-4.1-mini",
-  "gpt-4.1",
 ];
