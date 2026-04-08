@@ -123,6 +123,12 @@ export const quickActions: QuickActionItem[] = [
     route: "/builder",
   },
   {
+    id: "qa0",
+    label: "Review live sessions",
+    description: "Inspect paused or in-flight sessions and their trace details.",
+    route: "/sessions",
+  },
+  {
     id: "qa2",
     label: "Review pending approvals",
     description: "Handle urgent review tasks before SLA thresholds.",
