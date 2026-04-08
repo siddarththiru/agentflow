@@ -1,18 +1,9 @@
-body {
-  margin: 0;
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  background: #F2F2F2;
-  color: #000000;
-}
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap");
 
 * {
   box-sizing: border-box;
 }
 
-a {
-  color: inherit;
-}
-
-button {
-  font-family: inherit;
+body {
+  margin: 0;
 }
