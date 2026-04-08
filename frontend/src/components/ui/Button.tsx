@@ -6,5 +6,5 @@ import {
 export type ButtonProps = ChakraButtonProps;
 
 export const Button = (props: ButtonProps) => {
-  return <ChakraButton colorScheme="blue" {...props} />;
+  return <ChakraButton colorScheme="brand" {...props} />;
 };
