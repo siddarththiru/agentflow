@@ -314,7 +314,12 @@ export const SessionsPage = () => {
         </GridItem>
 
         <GridItem>
-          <VStack align="stretch" spacing={5} position="sticky" top="92px">
+          <VStack
+            align="stretch"
+            spacing={5}
+            position={{ base: "static", xl: "sticky" }}
+            top={{ base: "auto", xl: "92px" }}
+          >
             <DetailCard title="Run agent" subtitle="Secondary control for starting a new session by agent ID">
               <VStack align="stretch" spacing={4}>
                 <Input

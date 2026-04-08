@@ -3,17 +3,26 @@ import {
   Grid,
   GridItem,
   HStack,
+  Stat,
+  StatLabel,
+  StatNumber,
   Text,
   VStack,
+  useToast,
 } from "@chakra-ui/react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertList } from "../../components/ui/AlertList";
 import { ActivityList } from "../../components/ui/ActivityList";
+import { ExportMenu } from "../../components/operations/ExportMenu";
 import { Button } from "../../components/ui/Button";
 import { MetricCard } from "../../components/ui/MetricCard";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { Section } from "../../components/ui/Section";
 import { Surface } from "../../components/ui/Surface";
+import { downloadCsv, downloadJson } from "../../lib/export";
+import { getNotificationCenterData } from "../notifications/api";
+import { getLogStats } from "../reporting/api";
 import {
   dashboardStats,
   quickActions,
@@ -22,12 +31,80 @@ import {
 } from "./mockData";
 
 export const DashboardPage = () => {
+  const toast = useToast();
   const navigate = useNavigate();
+  const [liveAlertCount, setLiveAlertCount] = useState<number>(0);
+
+  useEffect(() => {
+    const loadCounts = async () => {
+      try {
+        const response = await getNotificationCenterData();
+        setLiveAlertCount(response.counts.total);
+      } catch {
+        setLiveAlertCount(0);
+      }
+    };
+
+    void loadCounts();
+  }, []);
+
   const metricIconMap = {
     shield: <Text fontSize="xl">S</Text>,
     clock: <Text fontSize="xl">T</Text>,
     branch: <Text fontSize="xl">A</Text>,
     link: <Text fontSize="xl">L</Text>,
+  };
+
+  const exportSnapshotJson = async () => {
+    try {
+      const [alerts, stats] = await Promise.all([
+        getNotificationCenterData(),
+        getLogStats(),
+      ]);
+
+      const payload = {
+        generated_at: new Date().toISOString(),
+        log_stats: stats,
+        notification_counts: alerts.counts,
+        top_alerts: alerts.alerts.slice(0, 10),
+        metrics: dashboardStats,
+      };
+      downloadJson("agentflow-dashboard-snapshot.json", payload);
+    } catch {
+      toast({
+        title: "Export failed",
+        description: "Unable to build dashboard snapshot right now.",
+        status: "error",
+        duration: 3000,
+      });
+    }
+  };
+
+  const exportSnapshotCsv = async () => {
+    try {
+      const alerts = await getNotificationCenterData();
+      downloadCsv(
+        "agentflow-dashboard-alerts.csv",
+        alerts.alerts.slice(0, 100).map((alert) => ({
+          id: alert.id,
+          source: alert.source,
+          severity: alert.severity,
+          title: alert.title,
+          description: alert.description,
+          timestamp: alert.timestamp,
+          session_id: alert.sessionId,
+          agent_id: alert.agentId,
+          route: alert.route,
+        }))
+      );
+    } catch {
+      toast({
+        title: "Export failed",
+        description: "Unable to export snapshot CSV right now.",
+        status: "error",
+        duration: 3000,
+      });
+    }
   };
 
   return (
@@ -37,7 +114,11 @@ export const DashboardPage = () => {
         description="Track platform activity, monitor risk signals, and move quickly from overview to action."
         actions={
           <HStack>
-            <Button variant="outline">Export snapshot</Button>
+            <ExportMenu
+              label="Export snapshot"
+              onExportJson={() => void exportSnapshotJson()}
+              onExportCsv={() => void exportSnapshotCsv()}
+            />
             <Button onClick={() => navigate("/builder")}>Open builder</Button>
           </HStack>
         }
@@ -77,6 +158,15 @@ export const DashboardPage = () => {
                 <Text fontSize="sm" color="text.secondary" fontWeight="600">
                   Today at a glance
                 </Text>
+                <Stat>
+                  <StatLabel color="text.muted">Live alerts</StatLabel>
+                  <HStack justify="space-between" align="center">
+                    <StatNumber>{liveAlertCount}</StatNumber>
+                    <Button size="sm" variant="ghost" onClick={() => navigate("/notifications")}>
+                      Open alerts
+                    </Button>
+                  </HStack>
+                </Stat>
                 <HStack justify="space-between">
                   <Text color="text.muted" fontSize="sm">
                     Active policies

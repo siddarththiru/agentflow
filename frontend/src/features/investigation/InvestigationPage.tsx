@@ -374,7 +374,12 @@ export const InvestigationPage = () => {
         </GridItem>
 
         <GridItem>
-          <VStack align="stretch" spacing={4} position="sticky" top="92px">
+          <VStack
+            align="stretch"
+            spacing={4}
+            position={{ base: "static", xl: "sticky" }}
+            top={{ base: "auto", xl: "92px" }}
+          >
             <SessionDetailPanel
               detail={detail || selectedSummary || null}
               events={timeline?.events || null}

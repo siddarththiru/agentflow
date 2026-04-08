@@ -288,7 +288,12 @@ export const ApprovalsPage = () => {
                 </GridItem>
 
                 <GridItem>
-                  <VStack align="stretch" spacing={4} position="sticky" top="92px">
+                  <VStack
+                    align="stretch"
+                    spacing={4}
+                    position={{ base: "static", xl: "sticky" }}
+                    top={{ base: "auto", xl: "92px" }}
+                  >
                     <DetailCard
                       title="Approval details"
                       subtitle="Decision context and audit trail"

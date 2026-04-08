@@ -32,7 +32,7 @@ export const AppShell = () => {
           <VStack align="start" spacing={0}>
             <Text fontWeight="700">AgentFlow</Text>
             <Text fontSize="xs" color="text.muted">
-              Phase 1 foundation
+              Operations console
             </Text>
           </VStack>
           <Spacer />

@@ -35,7 +35,7 @@ export const DataTable = <T,>({
 }: DataTableProps<T>) => {
   return (
     <Surface p={0} overflow="hidden">
-      <TableContainer>
+      <TableContainer overflowX="auto">
         <Table variant="simple" size="sm">
           <Thead bg="bg.surfaceMuted">
             <Tr>

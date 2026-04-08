@@ -102,8 +102,8 @@ export const StepShell = ({
 
       <Surface
         p={4}
-        position="sticky"
-        bottom={4}
+        position={{ base: "static", md: "sticky" }}
+        bottom={{ base: "auto", md: 4 }}
         bg="rgba(255,255,255,0.92)"
         backdropFilter="blur(2px)"
       >
