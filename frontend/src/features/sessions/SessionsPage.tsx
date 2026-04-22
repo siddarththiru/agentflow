@@ -1,12 +1,11 @@
 import {
-  Grid,
-  GridItem,
   HStack,
   Input,
   Select,
   Text,
   VStack,
   useToast,
+  useDisclosure,
 } from "@chakra-ui/react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -14,13 +13,13 @@ import { DataTable } from "../../components/operations/DataTable";
 import { ErrorPanel } from "../../components/operations/ErrorPanel";
 import { FilterBar } from "../../components/operations/FilterBar";
 import { LoadingPanel } from "../../components/operations/LoadingPanel";
-import { SessionDetailPanel } from "../../components/operations/SessionDetailPanel";
 import { SessionStatusBadge } from "../../components/operations/SessionStatusBadge";
 import { Button } from "../../components/ui/Button";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { formatDateTime } from "../../lib/format";
-import { getSessionDetail, getSessionTimeline, listSessions, resumeAgent } from "./api";
-import { SessionDetail, SessionEvent, SessionSummary } from "./types";
+import { listSessions, resumeAgent } from "./api";
+import { SessionSummary } from "./types";
+import { SessionDetailModal } from "./SessionDetailModal";
 
 const PAGE_SIZE = 10;
 
@@ -36,6 +35,9 @@ export const SessionsPage = () => {
   const selectedSessionId = searchParams.get("sessionId") || "";
   const agentIdFromQuery = searchParams.get("agentId") || "";
 
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [modalSessionId, setModalSessionId] = useState<string | null>(null);
+
   const [filters, setFilters] = useState<SessionFilters>({ status: "", agentId: agentIdFromQuery });
   const [appliedFilters, setAppliedFilters] = useState<SessionFilters>({
     status: "",
@@ -47,11 +49,6 @@ export const SessionsPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  const [selectedDetail, setSelectedDetail] = useState<SessionDetail | null>(null);
-  const [selectedEvents, setSelectedEvents] = useState<SessionEvent[] | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
 
   const selectedSummary = useMemo(
     () => sessions.find((session) => session.session_id === selectedSessionId),
@@ -90,35 +87,23 @@ export const SessionsPage = () => {
     void loadSessions();
   }, [appliedFilters, offset]);
 
-  useEffect(() => {
-    if (!selectedSessionId) {
-      setSelectedDetail(null);
-      setSelectedEvents(null);
-      setDetailError(null);
+  const openSession = (sessionId: string) => {
+    setModalSessionId(sessionId);
+    onOpen();
+  };
+
+  const closeModal = () => {
+    onClose();
+    setModalSessionId(null);
+  };
+
+  const clearSelection = () => {
+    if (appliedFilters.agentId.trim()) {
+      setSearchParams({ agentId: appliedFilters.agentId.trim() });
       return;
     }
-
-    const loadSelectedSession = async () => {
-      setDetailLoading(true);
-      setDetailError(null);
-      try {
-        const [detail, timeline] = await Promise.all([
-          getSessionDetail(selectedSessionId),
-          getSessionTimeline(selectedSessionId),
-        ]);
-        setSelectedDetail(detail);
-        setSelectedEvents(timeline.events);
-      } catch (error) {
-        setDetailError(error instanceof Error ? error.message : "Unable to load session detail.");
-        setSelectedDetail(null);
-        setSelectedEvents(null);
-      } finally {
-        setDetailLoading(false);
-      }
-    };
-
-    void loadSelectedSession();
-  }, [selectedSessionId]);
+    setSearchParams({});
+  };
 
   useEffect(() => {
     setFilters((prev) => ({ ...prev, agentId: agentIdFromQuery }));
@@ -137,28 +122,12 @@ export const SessionsPage = () => {
     setOffset((current) => current + PAGE_SIZE);
   };
 
-  const openSession = (sessionId: string) => {
-    const nextParams: Record<string, string> = { sessionId };
-    if (appliedFilters.agentId.trim()) {
-      nextParams.agentId = appliedFilters.agentId.trim();
-    }
-    setSearchParams(nextParams);
-  };
-
-  const clearSelection = () => {
-    if (appliedFilters.agentId.trim()) {
-      setSearchParams({ agentId: appliedFilters.agentId.trim() });
-      return;
-    }
-    setSearchParams({});
-  };
-
   const handleResume = async () => {
-    if (!selectedSessionId) {
+    if (!modalSessionId) {
       return;
     }
     try {
-      const result = await resumeAgent(selectedSessionId);
+      const result = await resumeAgent(modalSessionId);
       toast({
         title: "Session resumed",
         description: `Session ${result.session_id} is now ${result.status}.`,
@@ -166,12 +135,6 @@ export const SessionsPage = () => {
         duration: 4000,
         isClosable: true,
       });
-      const [detail, timeline] = await Promise.all([
-        getSessionDetail(selectedSessionId),
-        getSessionTimeline(selectedSessionId),
-      ]);
-      setSelectedDetail(detail);
-      setSelectedEvents(timeline.events);
     } catch (error) {
       toast({
         title: "Resume failed",
@@ -267,48 +230,36 @@ export const SessionsPage = () => {
         <Button variant="ghost" onClick={() => setFilters({ status: "", agentId: "" })}>
           Clear
         </Button>
-        {selectedSessionId ? (
-          <Button variant="ghost" onClick={clearSelection}>
-            Clear selection
-          </Button>
-        ) : null}
       </FilterBar>
 
-      <Grid templateColumns={{ base: "1fr", xl: "1.25fr 0.85fr" }} gap={5} alignItems="start">
-        <GridItem>
-          <VStack align="stretch" spacing={4}>
-            {isLoading && sessions.length === 0 ? <LoadingPanel label="Loading sessions..." /> : null}
-            {loadError ? <ErrorPanel message={loadError} actionLabel="Retry" onAction={applyFilters} /> : null}
-            {!isLoading || sessions.length > 0 ? sessionsTable : null}
-            {hasMore ? (
-              <HStack justify="center">
-                <Button onClick={loadMore} isLoading={isLoadingMore} variant="outline">
-                  Load more
-                </Button>
-              </HStack>
-            ) : null}
-          </VStack>
-        </GridItem>
+      <VStack align="stretch" spacing={4}>
+        {isLoading && sessions.length === 0 ? <LoadingPanel label="Loading sessions..." /> : null}
+        {loadError ? <ErrorPanel message={loadError} actionLabel="Retry" onAction={applyFilters} /> : null}
+        {!isLoading || sessions.length > 0 ? sessionsTable : null}
+        {hasMore ? (
+          <HStack justify="center">
+            <Button onClick={loadMore} isLoading={isLoadingMore} variant="outline">
+              Load more
+            </Button>
+          </HStack>
+        ) : null}
+      </VStack>
 
-        <GridItem>
-          <VStack
-            align="stretch"
-            spacing={5}
-            position={{ base: "static", xl: "sticky" }}
-            top={{ base: "auto", xl: "92px" }}
-          >
-            <SessionDetailPanel
-              detail={selectedDetail || selectedSummary || null}
-              events={selectedEvents}
-              isLoading={detailLoading}
-              error={detailError}
-              onOpenApproval={(sessionId) => navigate(`/approvals?sessionId=${sessionId}`)}
-              onOpenInvestigation={(sessionId) => navigate(`/investigation?sessionId=${sessionId}`)}
-              onResume={handleResume}
-            />
-          </VStack>
-        </GridItem>
-      </Grid>
+      <SessionDetailModal
+        sessionId={modalSessionId}
+        isOpen={isOpen}
+        onClose={closeModal}
+        size="4xl"
+        onOpenApproval={(sessionId) => {
+          closeModal();
+          navigate(`/approvals?sessionId=${sessionId}`);
+        }}
+        onOpenInvestigation={(sessionId) => {
+          closeModal();
+          navigate(`/investigation?sessionId=${sessionId}`);
+        }}
+        onResume={handleResume}
+      />
     </VStack>
   );
 };

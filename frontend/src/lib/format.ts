@@ -29,6 +29,7 @@ export const formatCompactDateTime = (value?: string | null): string => {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    second: "2-digit",
   }).format(date);
 };
 
