@@ -3,6 +3,8 @@ import {
   Checkbox,
   Grid,
   HStack,
+  Icon,
+  IconButton,
   Input,
   Modal,
   ModalBody,
@@ -33,6 +35,7 @@ import { MetadataList } from "../../components/operations/MetadataList";
 import { RiskBadge } from "../../components/operations/RiskBadge";
 import { SessionStatusBadge } from "../../components/operations/SessionStatusBadge";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { downloadJson } from "../../lib/export";
 import { formatDateTime } from "../../lib/format";
 import {
   getAgentProfile,
@@ -47,6 +50,7 @@ import {
   AgentMutablePolicy,
   AgentProfile,
 } from "./types";
+import { modelOptions } from "../builder/constants";
 
 interface AgentProfileModalProps {
   agentId: number | null;
@@ -95,6 +99,13 @@ export const AgentProfileModal = ({
 
   const [availableTools, setAvailableTools] = useState<Array<{ id: number; name: string; usable: boolean }>>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
+
+  const availableModelOptions = useMemo(() => {
+    if (!profile?.agent.model || modelOptions.includes(profile.agent.model)) {
+      return modelOptions;
+    }
+    return [profile.agent.model, ...modelOptions];
+  }, [profile?.agent.model]);
 
   const loadProfile = async (id: number) => {
     setProfileLoading(true);
@@ -273,6 +284,35 @@ export const AgentProfileModal = ({
     }
   };
 
+  const handleCopyDefinition = async () => {
+    if (!profile?.definition) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(profile.definition, null, 2));
+      toast({
+        title: "Definition copied",
+        status: "success",
+        duration: 2000,
+      });
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Clipboard access was unavailable.",
+        status: "error",
+        duration: 3000,
+      });
+    }
+  };
+
+  const handleExportDefinition = () => {
+    if (!profile?.definition) return;
+    downloadJson(`agent-${profile.agent.id}-definition.json`, profile.definition);
+    toast({
+      title: "Definition exported",
+      status: "success",
+      duration: 2000,
+    });
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="2xl" scrollBehavior="inside">
       <ModalOverlay />
@@ -346,13 +386,19 @@ export const AgentProfileModal = ({
                                 metadataDraft && setMetadataDraft({ ...metadataDraft, purpose: e.target.value })
                               }
                             />
-                            <Input
-                              placeholder="Model"
+                            <Select
+                              placeholder="Select model"
                               value={metadataDraft?.model || ""}
                               onChange={(e) =>
                                 metadataDraft && setMetadataDraft({ ...metadataDraft, model: e.target.value })
                               }
-                            />
+                            >
+                              {availableModelOptions.map((model) => (
+                                <option key={model} value={model}>
+                                  {model}
+                                </option>
+                              ))}
+                            </Select>
                             <HStack>
                               <Button size="sm" onClick={() => void saveMetadata()} isLoading={saveMetadataLoading}>
                                 Save
@@ -643,11 +689,44 @@ export const AgentProfileModal = ({
                   <TabPanel>
                     <VStack align="stretch">
                       {profile.definition ? (
-                        <JsonPreviewPanel
-                          title="Agent Definition"
-                          data={profile.definition as any}
-                          maxHeight="280px"
-                        />
+                        <>
+                          <HStack justify="flex-end" mb={2}>
+                            <IconButton
+                              aria-label="Copy definition to clipboard"
+                              icon={
+                                <Icon viewBox="0 0 24 24" boxSize={4}>
+                                  <path
+                                    fill="currentColor"
+                                    d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10V1zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16h-9V7h9v14z"
+                                  />
+                                </Icon>
+                              }
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => void handleCopyDefinition()}
+                            />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              leftIcon={
+                                <Icon viewBox="0 0 24 24" boxSize={4}>
+                                  <path
+                                    fill="currentColor"
+                                    d="M5 20h14v-2H5v2zM12 2v12l4-4 1.41 1.41L12 17.83l-5.41-5.42L8 10l4 4V2h0z"
+                                  />
+                                </Icon>
+                              }
+                              onClick={handleExportDefinition}
+                            >
+                              Export JSON
+                            </Button>
+                          </HStack>
+                          <JsonPreviewPanel
+                            title="Agent Definition"
+                            data={profile.definition as any}
+                            maxHeight="280px"
+                          />
+                        </>
                       ) : (
                         <EmptyPanel
                           title="No definition"
