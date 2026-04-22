@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import List
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
@@ -15,11 +15,143 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
+
+def _safe_json_load(value: str) -> Dict[str, Any]:
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _extract_latest_risks(logs: List[models.Log]) -> Tuple[Dict[str, str], Dict[int, str]]:
+    session_risk: Dict[str, str] = {}
+    agent_risk: Dict[int, str] = {}
+    latest_session_ts: Dict[str, datetime] = {}
+    latest_agent_ts: Dict[int, datetime] = {}
+
+    for log in logs:
+        data = _safe_json_load(log.event_data)
+        risk_level = str(data.get("risk_level", "")).lower().strip()
+        if not risk_level:
+            continue
+
+        if log.session_id not in latest_session_ts or log.timestamp > latest_session_ts[log.session_id]:
+            latest_session_ts[log.session_id] = log.timestamp
+            session_risk[log.session_id] = risk_level
+
+        if log.agent_id not in latest_agent_ts or log.timestamp > latest_agent_ts[log.agent_id]:
+            latest_agent_ts[log.agent_id] = log.timestamp
+            agent_risk[log.agent_id] = risk_level
+
+    return session_risk, agent_risk
+
+
+def _compute_health_status(
+    latest_session_status: Optional[str],
+    pending_approvals: int,
+    latest_risk_level: Optional[str],
+) -> str:
+    risk = (latest_risk_level or "").lower()
+    session_status = (latest_session_status or "").lower()
+
+    if risk in {"critical", "high"} or session_status in {"failed", "terminated"}:
+        return "risk"
+    if pending_approvals > 0 or session_status == "paused":
+        return "attention"
+    return "healthy"
+
 def _get_agent_or_404(agent_id: int, session: Session) -> models.Agent:
     agent = session.get(models.Agent, agent_id)
     if not agent:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
     return agent
+
+
+@router.get("", response_model=List[schemas.AgentSummaryRead])
+def list_agents(session: Session = Depends(get_session)) -> List[schemas.AgentSummaryRead]:
+    agents = session.exec(select(models.Agent)).all()
+    if not agents:
+        return []
+
+    agent_ids = [agent.id for agent in agents if agent.id is not None]
+    if not agent_ids:
+        return []
+
+    sessions = session.exec(
+        select(models.Session).where(models.Session.agent_id.in_(agent_ids))
+    ).all()
+    policies = session.exec(
+        select(models.Policy).where(models.Policy.agent_id.in_(agent_ids))
+    ).all()
+    agent_tools = session.exec(
+        select(models.AgentTool).where(models.AgentTool.agent_id.in_(agent_ids))
+    ).all()
+    pending_approvals = session.exec(
+        select(models.Approval).where(
+            models.Approval.agent_id.in_(agent_ids),
+            models.Approval.status == "pending",
+        )
+    ).all()
+    classification_logs = session.exec(
+        select(models.Log).where(
+            models.Log.agent_id.in_(agent_ids),
+            models.Log.event_type == "threat_classification",
+        )
+    ).all()
+
+    sessions_by_agent: Dict[int, List[models.Session]] = {}
+    for session_record in sessions:
+        sessions_by_agent.setdefault(session_record.agent_id, []).append(session_record)
+
+    policy_by_agent = {policy.agent_id: policy for policy in policies}
+
+    tools_count_by_agent: Dict[int, int] = {}
+    for link in agent_tools:
+        tools_count_by_agent[link.agent_id] = tools_count_by_agent.get(link.agent_id, 0) + 1
+
+    pending_by_agent: Dict[int, int] = {}
+    for approval in pending_approvals:
+        pending_by_agent[approval.agent_id] = pending_by_agent.get(approval.agent_id, 0) + 1
+
+    _, latest_risk_by_agent = _extract_latest_risks(classification_logs)
+
+    summaries: List[schemas.AgentSummaryRead] = []
+    for agent in sorted(agents, key=lambda item: item.updated_at, reverse=True):
+        agent_id = int(agent.id)
+        agent_sessions = sessions_by_agent.get(agent_id, [])
+        latest_session = max(agent_sessions, key=lambda item: item.updated_at) if agent_sessions else None
+        latest_status = latest_session.status if latest_session else None
+        latest_risk = latest_risk_by_agent.get(agent_id)
+        pending_count = pending_by_agent.get(agent_id, 0)
+        policy = policy_by_agent.get(agent_id)
+
+        summaries.append(
+            schemas.AgentSummaryRead(
+                id=agent_id,
+                name=agent.name,
+                description=agent.description,
+                model=agent.model,
+                created_at=agent.created_at,
+                updated_at=agent.updated_at,
+                sessions_count=len(agent_sessions),
+                tools_count=tools_count_by_agent.get(agent_id, 0),
+                pending_approvals=pending_count,
+                latest_session_status=latest_status,
+                health_status=_compute_health_status(latest_status, pending_count, latest_risk),
+                latest_risk_level=latest_risk,
+                policy=(
+                    schemas.AgentPolicySummary(
+                        frequency_limit=policy.frequency_limit,
+                        require_approval_for_all_tool_calls=policy.require_approval_for_all_tool_calls,
+                    )
+                    if policy
+                    else None
+                ),
+            )
+        )
+
+    return summaries
 
 @router.post("", response_model=schemas.AgentRead, status_code=status.HTTP_201_CREATED)
 def create_agent(agent_in: schemas.AgentCreate, session: Session = Depends(get_session)) -> schemas.AgentRead:
@@ -37,6 +169,154 @@ def create_agent(agent_in: schemas.AgentCreate, session: Session = Depends(get_s
 def get_agent(agent_id: int, session: Session = Depends(get_session)) -> schemas.AgentRead:
     agent = _get_agent_or_404(agent_id, session)
     return agent
+
+
+@router.get("/{agent_id}/sessions", response_model=List[schemas.SessionSummaryRead])
+def list_agent_sessions(
+    agent_id: int,
+    session: Session = Depends(get_session)
+) -> List[schemas.SessionSummaryRead]:
+    """List all sessions for an agent, sorted by most recent."""
+    _get_agent_or_404(agent_id, session)
+    
+    sessions_list = session.exec(
+        select(models.Session)
+        .where(models.Session.agent_id == agent_id)
+        .order_by(models.Session.updated_at.desc())
+    ).all()
+    
+    return [
+        schemas.SessionSummaryRead(
+            session_id=s.session_id,
+            agent_id=s.agent_id,
+            title=s.title,
+            status=s.status,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
+        for s in sessions_list
+    ]
+
+
+@router.post("/{agent_id}/sessions", response_model=schemas.SessionSummaryRead, status_code=status.HTTP_201_CREATED)
+def create_agent_session(
+    agent_id: int,
+    session: Session = Depends(get_session)
+) -> schemas.SessionSummaryRead:
+    """Create a new empty chat session for an agent."""
+    agent = _get_agent_or_404(agent_id, session)
+    
+    import uuid
+    session_id = str(uuid.uuid4())
+    
+    new_session = models.Session(
+        session_id=session_id,
+        agent_id=agent_id,
+        status="running",
+        user_input="",  # Empty for new chat sessions
+        title=None,  # Will be auto-generated from first message
+    )
+    
+    session.add(new_session)
+    session.commit()
+    session.refresh(new_session)
+    
+    return schemas.SessionSummaryRead(
+        session_id=new_session.session_id,
+        agent_id=new_session.agent_id,
+        title=new_session.title,
+        status=new_session.status,
+        created_at=new_session.created_at,
+        updated_at=new_session.updated_at,
+    )
+
+
+@router.get("/{agent_id}/profile", response_model=schemas.AgentProfileRead)
+def get_agent_profile(agent_id: int, session: Session = Depends(get_session)) -> schemas.AgentProfileRead:
+    agent = _get_agent_or_404(agent_id, session)
+
+    policy = session.exec(select(models.Policy).where(models.Policy.agent_id == agent_id)).first()
+    tools = session.exec(
+        select(models.Tool)
+        .join(models.AgentTool)
+        .where(models.AgentTool.agent_id == agent_id)
+    ).all()
+    sessions = session.exec(
+        select(models.Session).where(models.Session.agent_id == agent_id)
+    ).all()
+    approvals = session.exec(
+        select(models.Approval)
+        .where(models.Approval.agent_id == agent_id)
+        .order_by(models.Approval.requested_at.desc())
+    ).all()
+    classification_logs = session.exec(
+        select(models.Log)
+        .where(models.Log.agent_id == agent_id, models.Log.event_type == "threat_classification")
+        .order_by(models.Log.timestamp.desc())
+    ).all()
+
+    latest_risk_by_session, latest_risk_by_agent = _extract_latest_risks(classification_logs)
+    latest_agent_risk = latest_risk_by_agent.get(agent_id)
+
+    sorted_sessions = sorted(sessions, key=lambda item: item.updated_at, reverse=True)
+    recent_sessions = [
+        schemas.AgentRecentSessionRead(
+            session_id=session_record.session_id,
+            status=session_record.status,
+            created_at=session_record.created_at,
+            updated_at=session_record.updated_at,
+            latest_risk_level=latest_risk_by_session.get(session_record.session_id),
+        )
+        for session_record in sorted_sessions[:8]
+    ]
+
+    recent_approvals = [
+        schemas.AgentRecentApprovalRead(
+            id=int(approval.id),
+            session_id=approval.session_id,
+            tool_name=approval.tool_name,
+            status=approval.status,
+            requested_at=approval.requested_at,
+            decided_at=approval.decided_at,
+            decided_by=approval.decided_by,
+            decision_reason=approval.decision_reason,
+            risk_level=latest_risk_by_session.get(approval.session_id),
+        )
+        for approval in approvals[:8]
+    ]
+
+    latest_classifications: List[schemas.AgentLatestClassificationRead] = []
+    for log in classification_logs[:8]:
+        data = _safe_json_load(log.event_data)
+        latest_classifications.append(
+            schemas.AgentLatestClassificationRead(
+                session_id=log.session_id,
+                risk_level=data.get("risk_level"),
+                confidence=data.get("confidence"),
+                explanation=data.get("explanation"),
+                timestamp=log.timestamp,
+            )
+        )
+
+    pending_approvals = sum(1 for approval in approvals if approval.status == "pending")
+    latest_session_status = sorted_sessions[0].status if sorted_sessions else None
+
+    definition: Optional[schemas.AgentDefinition] = None
+    if policy:
+        definition = get_definition(agent_id, session)
+
+    return schemas.AgentProfileRead(
+        agent=schemas.AgentRead.from_orm(agent),
+        policy=schemas.PolicyRead.from_orm(policy) if policy else None,
+        tools=[schemas.ToolRead.from_orm(tool) for tool in tools],
+        definition=definition,
+        health_status=_compute_health_status(latest_session_status, pending_approvals, latest_agent_risk),
+        sessions_count=len(sessions),
+        pending_approvals=pending_approvals,
+        recent_sessions=recent_sessions,
+        recent_approvals=recent_approvals,
+        latest_classifications=latest_classifications,
+    )
 
 @router.patch("/{agent_id}", response_model=schemas.AgentRead)
 def update_agent(
@@ -273,23 +553,41 @@ def run_agent(
         db_session=session
     )
     
-    # Execute agent
-    result = runtime.execute(request.user_input)
-    
-    # Persist session record
+    import uuid
+    session_id = str(uuid.uuid4())
     session_record = models.Session(
-        session_id=result["session_id"],
+        session_id=session_id,
         agent_id=request.agent_id,
-        status=result["status"],
+        status="running",
         user_input=request.user_input
     )
-    if result["status"] == "paused" and getattr(runtime, "last_state_snapshot", None):
-        session_record.state_snapshot = json.dumps(runtime.last_state_snapshot)
+    session.add(session_record)
+    session.commit()
+
+    # Execute agent
+    result = runtime.execute(request.user_input, session_id=session_id)
+
+    session_record = session.exec(
+        select(models.Session).where(models.Session.session_id == session_id)
+    ).first()
+    if not session_record:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Session {session_id} disappeared during execution"
+        )
+
+    session_record.status = result["status"]
+    session_record.updated_at = datetime.utcnow()
+    session_record.state_snapshot = (
+        json.dumps(runtime.last_state_snapshot)
+        if result["status"] == "paused" and getattr(runtime, "last_state_snapshot", None)
+        else None
+    )
     session.add(session_record)
     session.commit()
     
     return schemas.RunAgentResponse(
-        session_id=result["session_id"],
+        session_id=session_id,
         status=result["status"],
         final_output=result.get("final_output"),
         error=result.get("error")

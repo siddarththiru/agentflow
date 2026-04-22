@@ -1,5 +1,4 @@
 import time
-from hashlib import sha256
 from typing import Any, Dict
 
 from app.schemas import AgentDefinitionTool
@@ -103,16 +102,12 @@ class ToolAdapter:
         if not city:
             raise ValueError("'city' is required")
 
-        normalized_city = city.lower()
-        seed = int(sha256(normalized_city.encode("utf-8")).hexdigest()[:8], 16)
-        condition_options = ["sunny", "cloudy", "rainy", "windy", "clear"]
-        temperature_c = (seed % 350) / 10.0 - 5.0
-        condition = condition_options[seed % len(condition_options)]
-
         return {
             "city": city,
-            "temperature_c": round(temperature_c, 1),
-            "condition": condition,
+            "temperature_c": 18,
+            "condition": "clear",
+            "unit": "celsius",
+            "reply": f"The weather in {city} is 18 degrees Celsius.",
         }
 
     def _execute_news_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -120,12 +115,13 @@ class ToolAdapter:
         if not topic:
             raise ValueError("'topic' is required")
 
-        title_base = topic.title()
+        headlines = [
+            f"{topic.title()}: local team announces product milestone",
+            f"{topic.title()}: analysts report steady adoption",
+            f"{topic.title()}: community event scheduled this week",
+        ]
         return {
             "topic": topic,
-            "headlines": [
-                f"{title_base}: analysts report notable market movement",
-                f"{title_base}: regulators publish new policy update",
-                f"{title_base}: industry leaders announce collaboration",
-            ],
+            "headlines": headlines,
+            "reply": f"Top headlines for {topic}: " + "; ".join(headlines),
         }

@@ -12,10 +12,13 @@ DEFAULT_TOOLS = [
         "output_schema": {
             "type": "object",
             "properties": {
+                "city": {"type": "string"},
                 "temperature_c": {"type": "number"},
                 "condition": {"type": "string"},
+                "unit": {"type": "string"},
+                "reply": {"type": "string"},
             },
-            "required": ["temperature_c", "condition"],
+            "required": ["city", "temperature_c", "condition", "unit", "reply"],
         },
     },
     {
@@ -26,8 +29,9 @@ DEFAULT_TOOLS = [
             "type": "object",
             "properties": {
                 "headlines": {"type": "array", "items": {"type": "string"}},
+                "reply": {"type": "string"},
             },
-            "required": ["headlines"],
+            "required": ["headlines", "reply"],
         },
     },
 ]

@@ -36,9 +36,13 @@ export const SessionsPage = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedSessionId = searchParams.get("sessionId") || "";
+  const agentIdFromQuery = searchParams.get("agentId") || "";
 
-  const [filters, setFilters] = useState<SessionFilters>({ status: "", agentId: "" });
-  const [appliedFilters, setAppliedFilters] = useState<SessionFilters>(filters);
+  const [filters, setFilters] = useState<SessionFilters>({ status: "", agentId: agentIdFromQuery });
+  const [appliedFilters, setAppliedFilters] = useState<SessionFilters>({
+    status: "",
+    agentId: agentIdFromQuery,
+  });
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -128,6 +132,13 @@ export const SessionsPage = () => {
     void loadSelectedSession();
   }, [selectedSessionId]);
 
+  useEffect(() => {
+    setFilters((prev) => ({ ...prev, agentId: agentIdFromQuery }));
+    setSessions([]);
+    setOffset(0);
+    setAppliedFilters((prev) => ({ ...prev, agentId: agentIdFromQuery }));
+  }, [agentIdFromQuery]);
+
   const applyFilters = () => {
     setSessions([]);
     setOffset(0);
@@ -139,10 +150,18 @@ export const SessionsPage = () => {
   };
 
   const openSession = (sessionId: string) => {
-    setSearchParams({ sessionId });
+    const nextParams: Record<string, string> = { sessionId };
+    if (appliedFilters.agentId.trim()) {
+      nextParams.agentId = appliedFilters.agentId.trim();
+    }
+    setSearchParams(nextParams);
   };
 
   const clearSelection = () => {
+    if (appliedFilters.agentId.trim()) {
+      setSearchParams({ agentId: appliedFilters.agentId.trim() });
+      return;
+    }
     setSearchParams({});
   };
 

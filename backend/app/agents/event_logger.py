@@ -5,10 +5,11 @@ from typing import Any, Dict
 from sqlmodel import Session
 
 from app import models
+from app.database import engine
 
 
 class EventLogger:    
-    def __init__(self, db_session: Session):
+    def __init__(self, db_session: Session | None = None):
         self.db_session = db_session
     
     def emit_event(
@@ -25,8 +26,9 @@ class EventLogger:
             event_data=json.dumps(event_data),
             timestamp=datetime.utcnow()
         )
-        self.db_session.add(log_entry)
-        self.db_session.commit()
+        with Session(engine) as session:
+            session.add(log_entry)
+            session.commit()
     
     def log_session_start(self, session_id: str, agent_id: int, user_input: str) -> None:
         self.emit_event(

@@ -1,8 +1,45 @@
 import json
 from typing import Any, Dict
 
-from jsonschema import ValidationError as JSONSchemaValidationError
-from jsonschema.validators import validator_for
+try:
+    from jsonschema import ValidationError as JSONSchemaValidationError
+    from jsonschema.validators import validator_for
+except ImportError:  # pragma: no cover - optional dependency fallback
+    JSONSchemaValidationError = ValueError
+    validator_for = None
+
+
+def _validate_type(field: str, value: Any, expected_type: str) -> None:
+    type_checks = {
+        "string": lambda item: isinstance(item, str),
+        "number": lambda item: isinstance(item, (int, float)) and not isinstance(item, bool),
+        "integer": lambda item: isinstance(item, int) and not isinstance(item, bool),
+        "boolean": lambda item: isinstance(item, bool),
+        "array": lambda item: isinstance(item, list),
+        "object": lambda item: isinstance(item, dict),
+    }
+    checker = type_checks.get(expected_type)
+    if checker and not checker(value):
+        raise ValueError(f"{field}: expected {expected_type}")
+
+
+def _validate_payload_without_jsonschema(schema: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Payload must be an object")
+
+    required = schema.get("required", [])
+    properties = schema.get("properties", {})
+
+    missing = [field for field in required if field not in payload]
+    if missing:
+        raise ValueError("; ".join(f"{field}: is required" for field in missing))
+
+    for field, field_schema in properties.items():
+        if field not in payload or not isinstance(field_schema, dict):
+            continue
+        expected_type = field_schema.get("type")
+        if isinstance(expected_type, str):
+            _validate_type(field, payload[field], expected_type)
 
 def validate_json_schema(schema_str: str) -> Dict[str, Any]:
     try:
@@ -15,6 +52,9 @@ def validate_json_schema(schema_str: str) -> Dict[str, Any]:
     
     # Validate schema semantics against the declared JSON Schema draft.
     # This catches malformed keyword usage early (e.g. minimum on strings).
+    if validator_for is None:
+        return schema
+
     try:
         validator_cls = validator_for(schema)
         validator_cls.check_schema(schema)
@@ -25,6 +65,10 @@ def validate_json_schema(schema_str: str) -> Dict[str, Any]:
 
 
 def validate_payload_against_schema(schema: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    if validator_for is None:
+        _validate_payload_without_jsonschema(schema, payload)
+        return
+
     try:
         validator_cls = validator_for(schema)
         validator_cls.check_schema(schema)

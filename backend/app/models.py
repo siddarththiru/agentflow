@@ -57,6 +57,7 @@ class Session(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: str = Field(unique=True, index=True)
     agent_id: int = Field(foreign_key="agents.id")
+    title: Optional[str] = None  # Auto-generated from first message or manually set
     status: str = Field(default="running")  # running | paused | completed | failed | terminated
     user_input: str
     state_snapshot: Optional[str] = None  # JSON snapshot of runtime state for resume
@@ -64,6 +65,7 @@ class Session(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     logs: List["Log"] = Relationship(back_populates="session", sa_relationship_kwargs={"cascade": "all, delete"})
+    messages: List["ChatMessage"] = Relationship(back_populates="session", sa_relationship_kwargs={"cascade": "all, delete"})
 
 class Log(SQLModel, table=True):
     __tablename__ = "logs"
@@ -76,6 +78,18 @@ class Log(SQLModel, table=True):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
     session: Session = Relationship(back_populates="logs")
+
+class ChatMessage(SQLModel, table=True):
+    __tablename__ = "chat_messages"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: str = Field(foreign_key="sessions.session_id", index=True)
+    role: str  # "user" | "assistant"
+    content: str
+    message_metadata: Optional[str] = Field(default=None, alias="metadata")  # JSON string for additional context (tool calls, etc.)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    session: Session = Relationship(back_populates="messages")
 
 class Approval(SQLModel, table=True):
     __tablename__ = "approvals"

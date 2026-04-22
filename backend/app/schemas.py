@@ -31,6 +31,68 @@ class AgentRead(AgentBase):
         orm_mode = True
 
 
+class AgentPolicySummary(BaseModel):
+    frequency_limit: Optional[int] = None
+    require_approval_for_all_tool_calls: bool = False
+
+
+class AgentSummaryRead(BaseModel):
+    id: int
+    name: str
+    description: str
+    model: str
+    created_at: datetime
+    updated_at: datetime
+    sessions_count: int
+    tools_count: int
+    pending_approvals: int
+    latest_session_status: Optional[str] = None
+    health_status: str
+    latest_risk_level: Optional[str] = None
+    policy: Optional[AgentPolicySummary] = None
+
+
+class AgentRecentSessionRead(BaseModel):
+    session_id: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    latest_risk_level: Optional[str] = None
+
+
+class AgentRecentApprovalRead(BaseModel):
+    id: int
+    session_id: str
+    tool_name: str
+    status: str
+    requested_at: datetime
+    decided_at: Optional[datetime] = None
+    decided_by: Optional[str] = None
+    decision_reason: Optional[str] = None
+    risk_level: Optional[str] = None
+
+
+class AgentLatestClassificationRead(BaseModel):
+    session_id: str
+    risk_level: Optional[str] = None
+    confidence: Optional[float] = None
+    explanation: Optional[str] = None
+    timestamp: datetime
+
+
+class AgentProfileRead(BaseModel):
+    agent: AgentRead
+    policy: Optional["PolicyRead"] = None
+    tools: List["ToolRead"]
+    definition: Optional["AgentDefinition"] = None
+    health_status: str
+    sessions_count: int
+    pending_approvals: int
+    recent_sessions: List[AgentRecentSessionRead]
+    recent_approvals: List[AgentRecentApprovalRead]
+    latest_classifications: List[AgentLatestClassificationRead]
+
+
 class ToolRead(BaseModel):
     id: int
     name: str
@@ -137,10 +199,54 @@ class SessionRead(BaseModel):
     id: int
     session_id: str
     agent_id: int
+    title: Optional[str] = None
     status: str
     user_input: str
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class ChatMessageRead(BaseModel):
+    id: int
+    session_id: str
+    role: str
+    content: str
+    metadata: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class ChatMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+    metadata: Optional[str] = None
+
+
+class SessionSummaryRead(BaseModel):
+    session_id: str
+    agent_id: int
+    title: Optional[str] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1)
+
+
+class SessionDetailRead(BaseModel):
+    session_id: str
+    agent_id: int
+    title: Optional[str] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    messages: List[ChatMessageRead] = []
 
     class Config:
         orm_mode = True
@@ -168,3 +274,10 @@ class RunAgentResponse(BaseModel):
     status: str
     final_output: Optional[str] = None
     error: Optional[str] = None
+
+
+AgentProfileRead.update_forward_refs(
+    PolicyRead=PolicyRead,
+    ToolRead=ToolRead,
+    AgentDefinition=AgentDefinition,
+)

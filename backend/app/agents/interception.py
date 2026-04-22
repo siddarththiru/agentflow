@@ -1,10 +1,11 @@
 from typing import Any, Dict
 
-from sqlmodel import Session as DBSession
+from sqlmodel import Session, Session as DBSession
 from datetime import datetime
 
 from app.agents.event_logger import EventLogger
 from app import models
+from app.database import engine
 
 class InterceptionDecision:   
     def __init__(
@@ -31,7 +32,7 @@ class InterceptionHook:
         session_id: str,
         agent_id: int,
         logger: EventLogger,
-        db_session: DBSession,
+        db_session: DBSession | None = None,
         allowed_tool_ids: list = None,
         frequency_limit: int = None,
         require_approval_for_all: bool = False
@@ -132,27 +133,26 @@ class InterceptionHook:
         tool_id: int,
         params_provided: bool = False
     ) -> None:
-        # Create approval record
-        approval = models.Approval(
-            session_id=self.session_id,
-            agent_id=self.agent_id,
-            tool_id=tool_id,
-            tool_name=tool_name,
-            status="pending",
-            requested_at=datetime.utcnow()
-        )
-        self.db_session.add(approval)
-        
-        # Update session status to paused
-        from sqlmodel import select
-        stmt = select(models.Session).where(models.Session.session_id == self.session_id)
-        session_record = self.db_session.exec(stmt).first()
-        if session_record:
-            session_record.status = "paused"
-            session_record.updated_at = datetime.utcnow()
-            self.db_session.add(session_record)
-        
-        self.db_session.commit()
+        with Session(engine) as session:
+            approval = models.Approval(
+                session_id=self.session_id,
+                agent_id=self.agent_id,
+                tool_id=tool_id,
+                tool_name=tool_name,
+                status="pending",
+                requested_at=datetime.utcnow()
+            )
+            session.add(approval)
+
+            from sqlmodel import select
+            stmt = select(models.Session).where(models.Session.session_id == self.session_id)
+            session_record = session.exec(stmt).first()
+            if session_record:
+                session_record.status = "paused"
+                session_record.updated_at = datetime.utcnow()
+                session.add(session_record)
+
+            session.commit()
         
         # Log approval_requested event
         event_data = {

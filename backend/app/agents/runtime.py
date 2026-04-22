@@ -2,7 +2,7 @@ import uuid
 import json
 import time
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Any, Dict, List
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
@@ -13,14 +13,13 @@ from langchain_core.messages import (
     messages_to_dict,
     messages_from_dict
 )
-from langgraph.checkpoint import MemorySaver
-from langgraph.graph import END, StateGraph
 from sqlmodel import Session, select
 
 from app.agents.event_logger import EventLogger
 from app.agents.interception import InterceptionHook, InterceptionDecision
 from app.agents.runtime_state import RuntimeState
 from app.agents.tool_adapter import ToolAdapter
+from app.database import engine
 from app.schemas import AgentDefinition, AgentDefinitionTool
 from app import models
 
@@ -33,18 +32,59 @@ class AgentRuntime:
         db_session: Session
     ):
         self.agent_def = agent_definition
-        self.chat_model = chat_model
         self.db_session = db_session
         self.logger = EventLogger(db_session)
         
         self.tools_dict: Dict[str, AgentDefinitionTool] = {
             tool.name: tool for tool in agent_definition.tools
         }
+        self.chat_model = self._bind_tools(chat_model)
         
         self.system_prompt = self._build_system_prompt()
         self.last_state_snapshot = None
-        # Placeholder for PostgresSaver when DB-backed checkpoints are ready.
-        self.checkpointer = MemorySaver()
+
+    def _passthrough_terminal_state(self, state: RuntimeState) -> RuntimeState:
+        return {
+            "execution_status": state.get("execution_status"),
+            "final_output": state.get("final_output"),
+            "error": state.get("error"),
+            "pending_tool_call": state.get("pending_tool_call"),
+            "pending_tool_decision": state.get("pending_tool_decision"),
+        }
+
+    def _build_tool_specs(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema,
+            }
+            for tool in self.agent_def.tools
+        ]
+
+    def _bind_tools(self, chat_model: BaseChatModel) -> BaseChatModel:
+        if not self.agent_def.tools:
+            return chat_model
+
+        try:
+            return chat_model.bind_tools(self._build_tool_specs())
+        except (AttributeError, NotImplementedError, ValueError):
+            return chat_model
+
+    def _build_runtime_components(
+        self,
+        session_id: str,
+    ) -> tuple[ToolAdapter, InterceptionHook]:
+        tool_adapter = ToolAdapter(self.tools_dict)
+        interception_hook = InterceptionHook(
+            session_id=session_id,
+            agent_id=self.agent_def.agent_id,
+            logger=self.logger,
+            allowed_tool_ids=[tool.id for tool in self.agent_def.tools],
+            frequency_limit=self.agent_def.policy.frequency_limit,
+            require_approval_for_all=self.agent_def.policy.require_approval_for_all_tool_calls
+        )
+        return tool_adapter, interception_hook
     
     def _build_system_prompt(self) -> str:
         prompt_parts = [
@@ -58,15 +98,18 @@ class AgentRuntime:
             prompt_parts.append(f"- {tool.name}: {tool.description}")
         
         prompt_parts.append("\nFollow these rules:")
-        prompt_parts.append("- Use tools when needed to answer questions")
+        prompt_parts.append("- Use one tool call when a tool is needed to answer the user")
+        prompt_parts.append("- Use at most one tool call per turn")
+        prompt_parts.append("- After a tool returns, answer from the tool result")
+        prompt_parts.append("- Do not invent tool results")
+        prompt_parts.append("- Do not ask the user for approval unless the runtime has explicitly paused the tool call")
         prompt_parts.append("- Provide clear, concise answers")
         prompt_parts.append("- If you cannot answer, explain why")
         
         return "\n".join(prompt_parts)
     
-    def execute(self, user_input: str) -> Dict:
-        # Generate session ID
-        session_id = str(uuid.uuid4())
+    def execute(self, user_input: str, session_id: str | None = None) -> Dict:
+        session_id = session_id or str(uuid.uuid4())
         
         # Log session start
         self.logger.log_session_start(
@@ -75,20 +118,7 @@ class AgentRuntime:
             user_input=user_input
         )
         
-        # Initialize runtime components
-        tool_adapter = ToolAdapter(self.tools_dict)
-        interception_hook = InterceptionHook(
-            session_id=session_id,
-            agent_id=self.agent_def.agent_id,
-            logger=self.logger,
-            db_session=self.db_session,
-            allowed_tool_ids=[tool.id for tool in self.agent_def.tools],
-            frequency_limit=self.agent_def.policy.frequency_limit,
-            require_approval_for_all=self.agent_def.policy.require_approval_for_all_tool_calls
-        )
-        
-        # Build and execute graph
-        graph = self._build_graph(tool_adapter, interception_hook)
+        tool_adapter, interception_hook = self._build_runtime_components(session_id)
         
         # Initialize state
         initial_state: RuntimeState = {
@@ -105,17 +135,12 @@ class AgentRuntime:
             "error": None
         }
         
-        config = {"configurable": {"thread_id": session_id}}
-        
         try:
-            # Execute graph (will interrupt before tool execution due to interrupt_before=["invoke_tool"])
-            final_state = graph.invoke(initial_state, config)
-
-            # Check if execution was paused at the interrupt point
-            graph_state = graph.get_state(config)
-            if graph_state.next:  # Non-empty next means paused at interrupt_before
+            self.last_state_snapshot = None
+            final_state = self._run_simple_turn(initial_state, tool_adapter, interception_hook)
+            status = final_state.get("execution_status", "failed")
+            if status == "paused":
                 self._save_paused_state(final_state)
-                final_state["execution_status"] = "paused"
                 self.logger.log_session_end(
                     session_id=session_id,
                     agent_id=self.agent_def.agent_id,
@@ -134,14 +159,14 @@ class AgentRuntime:
             self.logger.log_session_end(
                 session_id=session_id,
                 agent_id=self.agent_def.agent_id,
-                status=final_state["execution_status"],
+                status=status,
                 final_output=final_state.get("final_output"),
                 error=final_state.get("error")
             )
             
             return {
                 "session_id": session_id,
-                "status": final_state["execution_status"],
+                "status": status,
                 "final_output": final_state.get("final_output"),
                 "error": final_state.get("error")
             }
@@ -161,48 +186,84 @@ class AgentRuntime:
                 "final_output": None,
                 "error": str(e)
             }
-    
-    def _build_graph(
-        self,
-        tool_adapter: ToolAdapter,
-        interception_hook: InterceptionHook
-    ) -> StateGraph:
-        graph = StateGraph(RuntimeState)
-        
-        # Add nodes
-        graph.add_node("reason", lambda state: self._reason_node(state))
-        graph.add_node(
-            "decide_action",
-            lambda state: self._decide_action_node(state, interception_hook)
-        )
-        graph.add_node(
-            "invoke_tool",
-            lambda state: self._invoke_tool_node(state, tool_adapter, interception_hook)
-        )
-        
-        # Define edges
-        graph.set_entry_point("reason")
-        graph.add_edge("reason", "decide_action")
-        
-        # Conditional routing from decide_action
-        graph.add_conditional_edges(
-            "decide_action",
-            lambda state: self._route_decision(state),
-            {
-                "tool": "invoke_tool",
-                "end": END
+
+    def run_chat_turn(self, session_id: str, conversation_messages: List[HumanMessage | AIMessage]) -> Dict[str, Any]:
+        tool_adapter, interception_hook = self._build_runtime_components(session_id)
+
+        initial_state: RuntimeState = {
+            "session_id": session_id,
+            "agent_id": self.agent_def.agent_id,
+            "messages": [SystemMessage(content=self.system_prompt), *conversation_messages],
+            "pending_tool_call": None,
+            "pending_tool_decision": None,
+            "execution_status": "running",
+            "final_output": None,
+            "error": None,
+        }
+
+        try:
+            self.last_state_snapshot = None
+            final_state = self._run_simple_turn(initial_state, tool_adapter, interception_hook)
+            status = final_state.get("execution_status", "failed")
+            if status == "paused":
+                self._save_paused_state(final_state)
+
+            return {
+                "session_id": session_id,
+                "status": status,
+                "final_output": final_state.get("final_output"),
+                "error": final_state.get("error"),
+                "state": final_state,
             }
-        )
-        
-        # Tool execution loops back to reasoning
-        graph.add_edge("invoke_tool", "reason")
-        
-        return graph.compile(
-            checkpointer=self.checkpointer,
-            interrupt_before=["invoke_tool"]
-        )
+        except Exception as exc:
+            return {
+                "session_id": session_id,
+                "status": "failed",
+                "final_output": None,
+                "error": str(exc),
+                "state": None,
+            }
+    
+    def _merge_state(self, state: RuntimeState, update: RuntimeState) -> RuntimeState:
+        merged = dict(state)
+        for key, value in update.items():
+            if key == "messages":
+                merged["messages"] = [*merged.get("messages", []), *value]
+            else:
+                merged[key] = value
+        return merged
+
+    def _run_simple_turn(
+        self,
+        initial_state: RuntimeState,
+        tool_adapter: ToolAdapter,
+        interception_hook: InterceptionHook,
+    ) -> RuntimeState:
+        state = self._merge_state(initial_state, self._reason_node(initial_state))
+        if state.get("execution_status") != "running":
+            return state
+
+        state = self._merge_state(state, self._decide_action_node(state, interception_hook))
+        if state.get("execution_status") != "running":
+            return state
+
+        if state.get("pending_tool_call") and state.get("pending_tool_decision") == "allow":
+            state = self._merge_state(state, self._invoke_tool_node(state, tool_adapter, interception_hook))
+            if state.get("execution_status") != "running":
+                return state
+
+            state = self._merge_state(state, self._reason_node(state))
+            if state.get("execution_status") != "running":
+                return state
+
+            state = self._merge_state(state, self._decide_action_node(state, interception_hook))
+
+        return state
     
     def _reason_node(self, state: RuntimeState) -> RuntimeState:
+        if state.get("execution_status") != "running":
+            return self._passthrough_terminal_state(state)
+
         self.logger.log_node_transition(
             session_id=state["session_id"],
             agent_id=state["agent_id"],
@@ -212,23 +273,35 @@ class AgentRuntime:
         
         try:
             response = self.chat_model.invoke(state["messages"])
-            messages = list(state["messages"])
-            messages.append(response)
-            
-            return {**state, "messages": messages}
+            return {"messages": [response]}
         
         except Exception as e:
             return {
-                **state,
                 "execution_status": "failed",
                 "error": f"Reasoning error: {str(e)}"
             }
+
+    def _serialize_tool_payload(self, payload: Any) -> str:
+        if isinstance(payload, str):
+            return payload
+
+        try:
+            return json.dumps(payload, ensure_ascii=True)
+        except TypeError:
+            return str(payload)
+
+    @staticmethod
+    def _has_tool_result(state: RuntimeState) -> bool:
+        return any(isinstance(message, ToolMessage) for message in state.get("messages", []))
     
     def _decide_action_node(
         self,
         state: RuntimeState,
         interception_hook: InterceptionHook
     ) -> RuntimeState:
+        if state.get("execution_status") != "running":
+            return self._passthrough_terminal_state(state)
+
         self.logger.log_node_transition(
             session_id=state["session_id"],
             agent_id=state["agent_id"],
@@ -238,7 +311,7 @@ class AgentRuntime:
         
         messages = state["messages"]
         if not messages:
-            return {**state, "execution_status": "failed", "error": "No messages"}
+            return {"execution_status": "failed", "error": "No messages"}
         
         last_message = messages[-1]
         
@@ -246,12 +319,19 @@ class AgentRuntime:
         if isinstance(last_message, AIMessage) and hasattr(last_message, "tool_calls"):
             tool_calls = getattr(last_message, "tool_calls", [])
             if tool_calls:
+                if self._has_tool_result(state):
+                    return {
+                        "execution_status": "failed",
+                        "error": "Only one tool call is supported per runtime turn",
+                        "pending_tool_call": None,
+                        "pending_tool_decision": None
+                    }
+
                 pending_call = tool_calls[0]
                 tool_name = pending_call.get("name", "unknown")
                 tool_def = self.tools_dict.get(tool_name)
                 if not tool_def:
                     return {
-                        **state,
                         "execution_status": "failed",
                         "error": f"Tool not found: {tool_name}",
                         "pending_tool_call": None,
@@ -266,7 +346,6 @@ class AgentRuntime:
 
                 if decision.decision == "block":
                     return {
-                        **state,
                         "execution_status": "terminated",
                         "error": f"Tool execution blocked: {decision.reason}",
                         "pending_tool_call": None,
@@ -275,7 +354,6 @@ class AgentRuntime:
 
                 if decision.decision == "pause":
                     return {
-                        **state,
                         "execution_status": "paused",
                         "error": f"Tool execution paused: {decision.reason}",
                         "pending_tool_call": pending_call,
@@ -284,21 +362,29 @@ class AgentRuntime:
 
                 # Allowed tool call; continue to invocation
                 return {
-                    **state,
                     "pending_tool_call": pending_call,
-                    "pending_tool_decision": "allow"
+                    "pending_tool_decision": "allow",
+                    "error": None
                 }
         
         # No tool call - extract final answer
         if isinstance(last_message, AIMessage):
             content = getattr(last_message, "content", "")
             return {
-                **state,
                 "execution_status": "completed",
-                "final_output": content
+                "final_output": content,
+                "pending_tool_call": None,
+                "pending_tool_decision": None,
+                "error": None
             }
         
-        return {**state, "execution_status": "completed", "final_output": "No response"}
+        return {
+            "execution_status": "completed",
+            "final_output": "No response",
+            "pending_tool_call": None,
+            "pending_tool_decision": None,
+            "error": None
+        }
     
     def _invoke_tool_node(
         self,
@@ -306,6 +392,9 @@ class AgentRuntime:
         tool_adapter: ToolAdapter,
         interception_hook: InterceptionHook
     ) -> RuntimeState:
+        if state.get("execution_status") != "running":
+            return self._passthrough_terminal_state(state)
+
         self.logger.log_node_transition(
             session_id=state["session_id"],
             agent_id=state["agent_id"],
@@ -316,7 +405,6 @@ class AgentRuntime:
         pending_call = state.get("pending_tool_call")
         if not pending_call:
             return {
-                **state,
                 "execution_status": "failed",
                 "error": "No pending tool call"
             }
@@ -354,7 +442,6 @@ class AgentRuntime:
             # Check if execution was blocked
             if result.get("blocked"):
                 return {
-                    **state,
                     "execution_status": "terminated",
                     "error": result.get("error", "Tool execution was blocked by policy"),
                     "pending_tool_call": None,
@@ -363,10 +450,7 @@ class AgentRuntime:
             
             # Check if execution was paused (approval required)
             if result.get("paused"):
-                # Save state snapshot for resume
-                self._save_paused_state(state)
                 return {
-                    **state,
                     "execution_status": "paused",
                     "error": result.get("error", "Tool execution paused - awaiting approval"),
                     "pending_tool_call": pending_call,  # Keep pending call for resume
@@ -375,24 +459,22 @@ class AgentRuntime:
             
             # Successful execution - append tool result to messages
             if result.get("success"):
-                messages = list(state["messages"])
-                messages.append(
-                    ToolMessage(
-                        content=str(result),
-                        tool_call_id=pending_call.get("id", "unknown")
-                    )
-                )
-                
+                tool_payload = result.get("result", result)
                 return {
-                    **state,
-                    "messages": messages,
+                    "messages": [
+                        ToolMessage(
+                            content=self._serialize_tool_payload(tool_payload),
+                            tool_call_id=pending_call.get("id", "unknown")
+                        )
+                    ],
+                    "execution_status": "running",
                     "pending_tool_call": None,
-                    "pending_tool_decision": None
+                    "pending_tool_decision": None,
+                    "error": None
                 }
             else:
                 # Tool failed
                 return {
-                    **state,
                     "execution_status": "failed",
                     "error": result.get("error", "Tool execution failed"),
                     "pending_tool_call": None,
@@ -401,15 +483,9 @@ class AgentRuntime:
         
         except Exception as e:
             return {
-                **state,
                 "execution_status": "failed",
                 "error": f"Tool execution error: {str(e)}"
             }
-    
-    def _route_decision(self, state: RuntimeState) -> str:
-        if state.get("pending_tool_call"):
-            return "tool"
-        return "end"
     
     def _save_paused_state(self, state: RuntimeState) -> None:
         session_id = state["session_id"]
@@ -421,19 +497,21 @@ class AgentRuntime:
             "messages": messages_data,
             "pending_tool_call": state.get("pending_tool_call"),
             "pending_tool_decision": state.get("pending_tool_decision"),
-            "execution_status": state.get("execution_status")
+            "execution_status": state.get("execution_status"),
+            "error": state.get("error")
         }
 
         self.last_state_snapshot = state_snapshot
         
         # Save to database
-        stmt = select(models.Session).where(models.Session.session_id == session_id)
-        session_record = self.db_session.exec(stmt).first()
-        if session_record:
-            session_record.state_snapshot = json.dumps(state_snapshot)
-            session_record.updated_at = datetime.now(timezone.utc)
-            self.db_session.add(session_record)
-            self.db_session.commit()
+        with Session(engine) as session:
+            stmt = select(models.Session).where(models.Session.session_id == session_id)
+            session_record = session.exec(stmt).first()
+            if session_record:
+                session_record.state_snapshot = json.dumps(state_snapshot)
+                session_record.updated_at = datetime.now(timezone.utc)
+                session.add(session_record)
+                session.commit()
     
     def resume_session(self, session_id: str) -> Dict:
         # 1. Verify session exists and is approved
@@ -456,40 +534,24 @@ class AgentRuntime:
         if approval.status != "approved":
             raise ValueError(f"Session {session_id} is not approved (approval status: {approval.status})")
         
-        # 3. Restore state from checkpoints (fallback to snapshot if needed)
-        tool_adapter = ToolAdapter(self.tools_dict)
-        interception_hook = InterceptionHook(
-            session_id=session_id,
-            agent_id=self.agent_def.agent_id,
-            logger=self.logger,
-            db_session=self.db_session,
-            allowed_tool_ids=[tool.id for tool in self.agent_def.tools],
-            frequency_limit=self.agent_def.policy.frequency_limit,
-            require_approval_for_all=self.agent_def.policy.require_approval_for_all_tool_calls
-        )
-        graph = self._build_graph(tool_adapter, interception_hook)
-        config = {"configurable": {"thread_id": session_id}}
+        # 3. Restore the paused state snapshot.
+        tool_adapter, interception_hook = self._build_runtime_components(session_id)
 
-        graph_state = graph.get_state(config)
-        current_state = graph_state.values if graph_state else None
+        if not session_record.state_snapshot:
+            raise ValueError(f"No checkpoint or snapshot found for session {session_id}")
 
-        if not current_state:
-            if not session_record.state_snapshot:
-                raise ValueError(f"No checkpoint or snapshot found for session {session_id}")
-
-            state_data = json.loads(session_record.state_snapshot)
-            messages = messages_from_dict(state_data["messages"])
-            current_state = {
-                "session_id": session_id,
-                "agent_id": session_record.agent_id,
-                "messages": messages,
-                "pending_tool_call": state_data.get("pending_tool_call"),
-                "pending_tool_decision": state_data.get("pending_tool_decision"),
-                "execution_status": state_data.get("execution_status", "paused"),
-                "final_output": None,
-                "error": state_data.get("error")
-            }
-            graph.update_state(config, current_state)
+        state_data = json.loads(session_record.state_snapshot)
+        messages = messages_from_dict(state_data["messages"])
+        current_state = {
+            "session_id": session_id,
+            "agent_id": session_record.agent_id,
+            "messages": messages,
+            "pending_tool_call": state_data.get("pending_tool_call"),
+            "pending_tool_decision": state_data.get("pending_tool_decision"),
+            "execution_status": state_data.get("execution_status", "paused"),
+            "final_output": None,
+            "error": state_data.get("error")
+        }
 
         pending_tool_call = current_state.get("pending_tool_call")
         if not pending_tool_call:
@@ -505,13 +567,6 @@ class AgentRuntime:
             result = tool_adapter.execute_tool(tool_name, tool_params)
             duration = (time.time() - start_time) * 1000
             
-            tool_result = {
-                "success": True,
-                "tool": tool_name,
-                "result": result,
-                "duration_ms": duration
-            }
-            
             # Log tool result
             self.logger.log_tool_result(
                 session_id=session_id,
@@ -522,35 +577,29 @@ class AgentRuntime:
                 success=True
             )
             
-            # Add tool result to messages and update state at the invoke_tool node
-            # Use messages_from_dict to preserve tool_call_id and additional_kwargs
+            # Add the approved tool result and continue with one final model response.
             messages = list(current_state["messages"])
             messages.append(
                 ToolMessage(
-                    content=str(tool_result),
+                    content=self._serialize_tool_payload(result),
                     tool_call_id=pending_tool_call.get("id", "unknown")
                 )
             )
 
-            # Inject ToolMessage result and clear pending state in single update
-            graph.update_state(
-                config,
-                {
-                    "messages": messages,
-                    "pending_tool_call": None,
-                    "pending_tool_decision": None,
-                    "execution_status": "running",
-                    "error": None
-                },
-                as_node="invoke_tool"
-            )
+            resumed_state: RuntimeState = {
+                **current_state,
+                "messages": messages,
+                "pending_tool_call": None,
+                "pending_tool_decision": None,
+                "execution_status": "running",
+                "final_output": None,
+                "error": None
+            }
 
-            # Continue graph execution after tool result injection
-            final_state = graph.invoke(None, config)
-
-            # Check if another pause was triggered
-            graph_state = graph.get_state(config)
-            if graph_state.next:  # Non-empty next means paused at interrupt_before
+            self.last_state_snapshot = None
+            final_state = self._run_simple_turn(resumed_state, tool_adapter, interception_hook)
+            status = final_state.get("execution_status", "failed")
+            if status == "paused":
                 self._save_paused_state(final_state)
                 session_record.status = "paused"
                 session_record.updated_at = datetime.now(timezone.utc)
@@ -571,7 +620,8 @@ class AgentRuntime:
                 }
 
             # Update session status
-            session_record.status = final_state["execution_status"]
+            session_record.status = status
+            session_record.state_snapshot = None
             session_record.updated_at = datetime.now(timezone.utc)
             self.db_session.add(session_record)
             self.db_session.commit()
@@ -580,14 +630,14 @@ class AgentRuntime:
             self.logger.log_session_end(
                 session_id=session_id,
                 agent_id=self.agent_def.agent_id,
-                status=final_state["execution_status"],
+                status=status,
                 final_output=final_state.get("final_output"),
                 error=final_state.get("error")
             )
 
             return {
                 "session_id": session_id,
-                "status": final_state["execution_status"],
+                "status": status,
                 "final_output": final_state.get("final_output"),
                 "error": final_state.get("error")
             }
