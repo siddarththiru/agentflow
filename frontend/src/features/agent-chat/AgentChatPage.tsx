@@ -13,7 +13,6 @@ import {
   useToast,
   Textarea,
   Text,
-  Spacer,
 } from "@chakra-ui/react";
 import { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
@@ -29,7 +28,7 @@ import {
   sendMessage,
   updateSessionTitle,
 } from "./api";
-import { ChatMessage, SessionSummary, SessionDetail } from "./types";
+import { SessionSummary, SessionDetail } from "./types";
 import { formatDateTime } from "../../lib/format";
 
 export const AgentChatPage = () => {
@@ -59,7 +58,7 @@ export const AgentChatPage = () => {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
 
   const loadSessions = async () => {
     setSessionsLoading(true);
@@ -108,8 +107,9 @@ export const AgentChatPage = () => {
   }, [currentSessionId]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [sessionDetail?.messages]);
+    if (!messagesScrollRef.current) return;
+    messagesScrollRef.current.scrollTop = messagesScrollRef.current.scrollHeight;
+  }, [sessionDetail?.messages.length]);
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !currentSessionId) return;
@@ -177,15 +177,15 @@ export const AgentChatPage = () => {
   };
 
   return (
-    <Flex direction="column" height="100vh" bg="surface.primary">
-      <Box p={6} borderBottom="1px solid" borderColor="border.soft">
+    <Flex direction="column" height="100%" maxH="100%" minH={0} bg="surface.primary" overflow="hidden">
+      <Box px={6} pt={0} pb={4} borderBottom="1px solid" borderColor="border.soft">
         <PageHeader
           title="Agent Chat"
           description="Chat with your agent and review conversation history"
         />
       </Box>
 
-      <Flex flex="1" overflow="hidden">
+      <Flex flex="1" minH={0} overflow="hidden">
         {/* Sidebar */}
         <Box
           width="300px"
@@ -193,9 +193,10 @@ export const AgentChatPage = () => {
           borderColor="border.soft"
           display={{ base: "none", lg: "flex" }}
           flexDirection="column"
-          overflowY="auto"
+          minH={0}
+          overflow="hidden"
         >
-          <VStack align="stretch" spacing={0} p={4}>
+          <VStack align="stretch" spacing={0} p={4} flexShrink={0}>
             <Button onClick={handleCreateNewSession} colorScheme="brand" mb={4}>
               New chat
             </Button>
@@ -203,7 +204,9 @@ export const AgentChatPage = () => {
             <Text fontSize="xs" fontWeight="700" color="text.secondary" mb={2}>
               RECENT SESSIONS
             </Text>
+          </VStack>
 
+          <VStack align="stretch" spacing={0} px={4} pb={4} flex="1" minH={0} overflowY="auto">
             {sessionsLoading ? (
               <Text color="text.secondary" fontSize="sm">Loading...</Text>
             ) : sessions.length === 0 ? (
@@ -236,7 +239,7 @@ export const AgentChatPage = () => {
         </Box>
 
         {/* Main Chat Area */}
-        <Flex flex="1" flexDirection="column" overflow="hidden">
+        <Flex flex="1" flexDirection="column" minH={0} overflow="hidden">
           {sessionLoading ? (
             <Box flex="1" display="flex" alignItems="center" justifyContent="center">
               <LoadingPanel label="Loading session..." />
@@ -309,23 +312,34 @@ export const AgentChatPage = () => {
               </Box>
 
               {/* Chat / History Views */}
-              <Tabs variant="soft-rounded" colorScheme="brand" flex="1" display="flex" flexDirection="column">
+              <Tabs
+                variant="soft-rounded"
+                colorScheme="brand"
+                flex="1"
+                display="flex"
+                flexDirection="column"
+                minH={0}
+                overflow="hidden"
+              >
                 <TabList px={4} pt={4}>
                   <Tab>Chat</Tab>
                   <Tab>History</Tab>
                 </TabList>
 
-                <TabPanels flex="1" display="flex" flexDirection="column">
+                <TabPanels flex="1" display="flex" flexDirection="column" minH={0} overflow="hidden">
                   {/* Chat Tab */}
-                  <TabPanel flex="1" display="flex" flexDirection="column" overflow="hidden">
-                    <VStack flex="1" align="stretch" spacing={4} overflow="hidden">
+                  <TabPanel p={0} flex="1" display="flex" flexDirection="column" minH={0} overflow="hidden">
+                    <Flex flex="1" direction="column" minH={0} overflow="hidden">
                       {/* Messages */}
                       <VStack
+                        ref={messagesScrollRef}
                         flex="1"
                         align="stretch"
                         spacing={3}
+                        minH={0}
                         overflowY="auto"
-                        px={2}
+                        px={4}
+                        py={4}
                       >
                         {sessionDetail.messages.length === 0 ? (
                           <Flex
@@ -347,40 +361,50 @@ export const AgentChatPage = () => {
                             </DetailCard>
                           ))
                         )}
-                        <div ref={messagesEndRef} />
                       </VStack>
 
                       {/* Message Composer */}
-                      <VStack align="stretch" spacing={2} px={2} pb={2}>
-                        <Textarea
-                          value={messageInput}
-                          onChange={(e) => setMessageInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              void handleSendMessage();
-                            }
-                          }}
-                          placeholder="Type your message... (Shift+Enter for new line)"
-                          minH="80px"
-                          disabled={sendingMessage}
-                        />
-                        <HStack justify="flex-end">
+                      <VStack
+                        align="stretch"
+                        spacing={2}
+                        px={4}
+                        py={3}
+                        borderTop="1px solid"
+                        borderColor="border.soft"
+                        bg="surface.primary"
+                        flexShrink={0}
+                      >
+                        <HStack align="flex-end" spacing={3}>
+                          <Textarea
+                            value={messageInput}
+                            onChange={(e) => setMessageInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                void handleSendMessage();
+                              }
+                            }}
+                            placeholder="Type your message... (Shift+Enter for new line)"
+                            minH="80px"
+                            disabled={sendingMessage}
+                            flex="1"
+                          />
                           <Button
                             onClick={handleSendMessage}
                             isLoading={sendingMessage}
                             isDisabled={!messageInput.trim()}
                             colorScheme="brand"
+                            alignSelf="flex-end"
                           >
                             Send
                           </Button>
                         </HStack>
                       </VStack>
-                    </VStack>
+                    </Flex>
                   </TabPanel>
 
                   {/* History Tab */}
-                  <TabPanel flex="1" overflowY="auto">
+                  <TabPanel flex="1" minH={0} overflowY="auto">
                     <VStack align="stretch" spacing={3}>
                       {sessionDetail.messages.length === 0 ? (
                         <EmptyPanel

@@ -77,7 +77,7 @@ export const AgentsPage = () => {
   };
 
   return (
-    <VStack align="stretch" spacing={6} p={6}>
+    <VStack align="stretch" spacing={6}>
       <PageHeader
         title="Agents"
         description="Browse and manage your conversation agents"

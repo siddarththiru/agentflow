@@ -12,11 +12,12 @@ import { AppSidebar } from "./AppSidebar";
 
 export const AppShell = () => {
   const location = useLocation();
+  const isAgentChatRoute = /^\/agents\/\d+\/chat$/.test(location.pathname);
 
   return (
-    <Flex minH="100vh" bg="bg.canvas">
+    <Flex h="100dvh" maxH="100dvh" overflow="hidden" bg="bg.canvas">
       <AppSidebar />
-      <VStack align="stretch" flex={1} spacing={0} minW={0}>
+      <VStack align="stretch" flex={1} spacing={0} minW={0} minH={0} overflow="hidden">
         <HStack
           as="header"
           px={{ base: 4, md: 8 }}
@@ -28,6 +29,7 @@ export const AppShell = () => {
           position="sticky"
           top={0}
           zIndex={5}
+          flexShrink={0}
         >
           <VStack align="start" spacing={0}>
             <Text fontWeight="700">AgentFlow</Text>
@@ -49,15 +51,28 @@ export const AppShell = () => {
             </Text>
           </Box>
         </HStack>
-        <Container
-          maxW="1200px"
-          w="100%"
-          py={{ base: 5, md: 8 }}
-          px={{ base: 4, md: 8 }}
-          className="app-page-container"
+        <Box
+          flex="1"
+          minH={0}
+          display="flex"
+          flexDirection="column"
+          overflowY={isAgentChatRoute ? "hidden" : "auto"}
+          overflowX="hidden"
         >
-          <Outlet />
-        </Container>
+          <Container
+            maxW="1200px"
+            w="100%"
+            h={isAgentChatRoute ? "100%" : undefined}
+            minH={isAgentChatRoute ? 0 : undefined}
+            display={isAgentChatRoute ? "flex" : undefined}
+            flexDirection={isAgentChatRoute ? "column" : undefined}
+            py={{ base: 5, md: 8 }}
+            px={{ base: 4, md: 8 }}
+            className="app-page-container"
+          >
+            <Outlet />
+          </Container>
+        </Box>
       </VStack>
     </Flex>
   );
