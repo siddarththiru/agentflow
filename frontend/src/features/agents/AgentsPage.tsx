@@ -1,5 +1,4 @@
 import {
-  HStack,
   Input,
   Select,
   VStack,
@@ -8,6 +7,7 @@ import {
   useDisclosure,
 } from "@chakra-ui/react";
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { DataTable } from "../../components/operations/DataTable";
 import { EmptyPanel } from "../../components/operations/EmptyPanel";
 import { ErrorPanel } from "../../components/operations/ErrorPanel";
@@ -32,6 +32,7 @@ const healthToBadge = (health: "healthy" | "attention" | "risk") => {
 
 export const AgentsPage = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const navigate = useNavigate();
 
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -153,6 +154,22 @@ export const AgentsPage = () => {
                 key: "updated",
                 header: "Updated",
                 render: (item: AgentSummary) => formatDateTime(item.updated_at),
+              },
+              {
+                key: "chat",
+                header: "Chat",
+                render: (item: AgentSummary) => (
+                  <Button
+                    size="sm"
+                    colorScheme="brand"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      navigate(`/agents/${item.id}/chat`);
+                    }}
+                  >
+                    New Chat
+                  </Button>
+                ),
               },
             ]}
             rows={filteredAgents}

@@ -243,7 +243,7 @@ export const AgentProfileModal = ({
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="2xl" scrollBehavior="inside">
       <ModalOverlay />
-      <ModalContent bg="surface.primary" border="1px" borderColor="border.soft">
+      <ModalContent bg="bg.surface" border="1px" borderColor="border.soft" boxShadow="floating">
         {profileLoading ? (
           <>
             <ModalHeader>Loading...</ModalHeader>
