@@ -247,7 +247,7 @@ export const SessionDetailModal = ({
                 {events && events.length > 0 ? (
                   <DetailCard
                     title="Timeline"
-                    subtitle="Chronological session trace (scroll horizontally)"
+                    subtitle="Workflow map with supporting activity"
                   >
                     <HorizontalTimeline events={events} />
                   </DetailCard>
