@@ -12,6 +12,11 @@ export const navItems: AppNavItem[] = [
     description: "Design and define agent behavior",
   },
   {
+    label: "Agents",
+    path: "/agents",
+    description: "Browse and manage governed agents",
+  },
+  {
     label: "Sessions",
     path: "/sessions",
     description: "Track runtime sessions",

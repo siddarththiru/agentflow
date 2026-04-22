@@ -24,6 +24,7 @@ type DataTableProps<T> = {
   rowKey: (item: T) => string;
   onRowClick?: (item: T) => void;
   emptyMessage?: string;
+  selectedRowKey?: string;
 };
 
 export const DataTable = <T,>({
@@ -32,6 +33,7 @@ export const DataTable = <T,>({
   rowKey,
   onRowClick,
   emptyMessage = "No results found.",
+  selectedRowKey,
 }: DataTableProps<T>) => {
   return (
     <Surface p={0} overflow="hidden">
@@ -60,6 +62,7 @@ export const DataTable = <T,>({
               <Tr
                 key={rowKey(row)}
                 cursor={onRowClick ? "pointer" : "default"}
+                bg={selectedRowKey === rowKey(row) ? "rgba(140, 169, 255, 0.12)" : undefined}
                 _hover={onRowClick ? { bg: "bg.surfaceMuted" } : undefined}
                 onClick={() => onRowClick?.(row)}
               >
