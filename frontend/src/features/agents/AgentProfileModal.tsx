@@ -21,9 +21,10 @@ import {
   useToast,
   Box,
 } from "@chakra-ui/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DetailCard } from "../../components/operations/DetailCard";
+import { ConfirmActionDialog } from "../../components/operations/ConfirmActionDialog";
 import { EmptyPanel } from "../../components/operations/EmptyPanel";
 import { ErrorPanel } from "../../components/operations/ErrorPanel";
 import { JsonPreviewPanel } from "../../components/operations/JsonPreviewPanel";
@@ -36,6 +37,7 @@ import { formatDateTime } from "../../lib/format";
 import {
   getAgentProfile,
   listAvailableTools,
+  deleteAgent,
   updateAgentMetadata,
   updateAgentPolicy,
   updateAgentTools,
@@ -71,6 +73,8 @@ export const AgentProfileModal = ({
 }: AgentProfileModalProps) => {
   const toast = useToast();
   const navigate = useNavigate();
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
   const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -87,6 +91,7 @@ export const AgentProfileModal = ({
   const [saveMetadataLoading, setSaveMetadataLoading] = useState(false);
   const [savePolicyLoading, setSavePolicyLoading] = useState(false);
   const [saveToolsLoading, setSaveToolsLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [availableTools, setAvailableTools] = useState<Array<{ id: number; name: string; usable: boolean }>>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -237,6 +242,34 @@ export const AgentProfileModal = ({
       });
     } finally {
       setSaveToolsLoading(false);
+    }
+  };
+
+  const handleDeleteAgent = async () => {
+    if (!profile) {
+      return;
+    }
+
+    setDeleteLoading(true);
+    try {
+      await deleteAgent(profile.agent.id);
+      toast({
+        title: "Agent deleted",
+        status: "success",
+        duration: 3000,
+      });
+      setIsDeleteDialogOpen(false);
+      onClose();
+      onProfileUpdated?.();
+    } catch (error) {
+      toast({
+        title: "Delete failed",
+        description: error instanceof Error ? error.message : "Unable to delete agent.",
+        status: "error",
+        duration: 3000,
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -638,11 +671,29 @@ export const AgentProfileModal = ({
                   Open Agent Chat
                 </Button>
                 <Button variant="ghost">View Investigation</Button>
+                <Button
+                  variant="outline"
+                  colorScheme="red"
+                  onClick={() => setIsDeleteDialogOpen(true)}
+                >
+                  Delete Agent
+                </Button>
               </VStack>
             </ModalBody>
           </>
         ) : null}
       </ModalContent>
+
+      <ConfirmActionDialog
+        isOpen={isDeleteDialogOpen}
+        title="Delete Agent"
+        message="This will permanently remove the agent and its related sessions, approvals, and logs."
+        confirmLabel="Delete"
+        isLoading={deleteLoading}
+        leastDestructiveRef={deleteCancelRef}
+        onConfirm={() => void handleDeleteAgent()}
+        onClose={() => setIsDeleteDialogOpen(false)}
+      />
     </Modal>
   );
 };

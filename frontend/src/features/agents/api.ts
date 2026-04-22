@@ -62,3 +62,11 @@ export const listAvailableTools = async (): Promise<ToolRecord[]> => {
   const response = await http.get<ToolRecord[]>("/tools");
   return response.data;
 };
+
+export const deleteAgent = async (agentId: number): Promise<void> => {
+  try {
+    await http.delete(`/agents/${agentId}`);
+  } catch (error) {
+    throw new Error(parseApiError(error, "Unable to delete agent."));
+  }
+};

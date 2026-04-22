@@ -204,7 +204,7 @@ def create_agent_session(
     session: Session = Depends(get_session)
 ) -> schemas.SessionSummaryRead:
     """Create a new empty chat session for an agent."""
-    agent = _get_agent_or_404(agent_id, session)
+    _get_agent_or_404(agent_id, session)
     
     import uuid
     session_id = str(uuid.uuid4())
@@ -342,6 +342,59 @@ def update_agent(
     session.commit()
     session.refresh(agent)
     return agent
+
+
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_agent(agent_id: int, session: Session = Depends(get_session)) -> None:
+    _get_agent_or_404(agent_id, session)
+
+    agent_sessions = session.exec(
+        select(models.Session).where(models.Session.agent_id == agent_id)
+    ).all()
+
+    for session_record in agent_sessions:
+        logs = session.exec(
+            select(models.Log).where(models.Log.session_id == session_record.session_id)
+        ).all()
+        for log in logs:
+            session.delete(log)
+
+        messages = session.exec(
+            select(models.ChatMessage).where(models.ChatMessage.session_id == session_record.session_id)
+        ).all()
+        for message in messages:
+            session.delete(message)
+
+        session.delete(session_record)
+
+    approvals = session.exec(
+        select(models.Approval).where(models.Approval.agent_id == agent_id)
+    ).all()
+    for approval in approvals:
+        session.delete(approval)
+
+    agent_logs = session.exec(
+        select(models.Log).where(models.Log.agent_id == agent_id)
+    ).all()
+    for log in agent_logs:
+        session.delete(log)
+
+    policy = session.exec(
+        select(models.Policy).where(models.Policy.agent_id == agent_id)
+    ).first()
+    if policy:
+        session.delete(policy)
+
+    links = session.exec(
+        select(models.AgentTool).where(models.AgentTool.agent_id == agent_id)
+    ).all()
+    for link in links:
+        session.delete(link)
+
+    agent = session.get(models.Agent, agent_id)
+    if agent:
+        session.delete(agent)
+    session.commit()
 
 @router.post("/{agent_id}/tools", response_model=List[schemas.ToolRead])
 def set_agent_tools(
