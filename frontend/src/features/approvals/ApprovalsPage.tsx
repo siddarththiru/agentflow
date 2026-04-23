@@ -37,11 +37,12 @@ export const ApprovalsPage = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedSessionId = searchParams.get("sessionId") || "";
+  const agentIdFromQuery = searchParams.get("agentId") || "";
 
   const [activeTabIndex, setActiveTabIndex] = useState(0);
   const activeStatus = TABS[activeTabIndex];
-  const [agentId, setAgentId] = useState("");
-  const [appliedAgentId, setAppliedAgentId] = useState("");
+  const [agentId, setAgentId] = useState(agentIdFromQuery);
+  const [appliedAgentId, setAppliedAgentId] = useState(agentIdFromQuery);
   const [approvals, setApprovals] = useState<ApprovalSummary[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -103,11 +104,25 @@ export const ApprovalsPage = () => {
     void loadDetail(selectedSessionId);
   }, [selectedSessionId]);
 
+  useEffect(() => {
+    setAgentId(agentIdFromQuery);
+    setAppliedAgentId(agentIdFromQuery);
+  }, [agentIdFromQuery]);
+
   const openApproval = (sessionId: string) => {
-    setSearchParams({ sessionId });
+    const next = new URLSearchParams();
+    next.set("sessionId", sessionId);
+    if (appliedAgentId.trim()) {
+      next.set("agentId", appliedAgentId.trim());
+    }
+    setSearchParams(next);
   };
 
   const clearSelection = () => {
+    if (appliedAgentId.trim()) {
+      setSearchParams({ agentId: appliedAgentId.trim() });
+      return;
+    }
     setSearchParams({});
   };
 
@@ -230,7 +245,7 @@ export const ApprovalsPage = () => {
       <FilterBar>
         <VStack align="start" spacing={1} minW="220px">
           <Text fontSize="sm" fontWeight="700" color="text.secondary">
-            Operator ID
+            Agent ID
           </Text>
           <Input
             value={agentId}
@@ -240,7 +255,22 @@ export const ApprovalsPage = () => {
         </VStack>
         <Button
           onClick={() => {
-            setAppliedAgentId(agentId.trim());
+            const trimmedAgentId = agentId.trim();
+            setAppliedAgentId(trimmedAgentId);
+            if (selectedSessionId) {
+              const next = new URLSearchParams();
+              next.set("sessionId", selectedSessionId);
+              if (trimmedAgentId) {
+                next.set("agentId", trimmedAgentId);
+              }
+              setSearchParams(next);
+              return;
+            }
+            if (trimmedAgentId) {
+              setSearchParams({ agentId: trimmedAgentId });
+              return;
+            }
+            setSearchParams({});
           }}
         >
           Apply
@@ -250,6 +280,11 @@ export const ApprovalsPage = () => {
           onClick={() => {
             setAgentId("");
             setAppliedAgentId("");
+            if (selectedSessionId) {
+              setSearchParams({ sessionId: selectedSessionId });
+              return;
+            }
+            setSearchParams({});
           }}
         >
           Clear
