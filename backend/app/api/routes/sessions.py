@@ -10,7 +10,7 @@ from app.database import get_session
 from app import models
 from app import schemas
 from app.agents.runtime import AgentRuntime
-from app.config import get_agent_chat_model
+from app.config import get_agent_chat_model, get_guard_chat_model
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -129,6 +129,16 @@ def _get_session_agent_definition(agent: models.Agent, db: Session) -> schemas.A
             require_approval_for_all_tool_calls=(
                 policy.require_approval_for_all_tool_calls if policy else False
             ),
+            intent_guard_enabled=policy.intent_guard_enabled if policy else True,
+            intent_guard_model_mode=policy.intent_guard_model_mode if policy else "dedicated",
+            intent_guard_model=policy.intent_guard_model if policy else "gemini-2.5-flash",
+            intent_guard_include_conversation=policy.intent_guard_include_conversation if policy else True,
+            intent_guard_include_tool_args=policy.intent_guard_include_tool_args if policy else False,
+            intent_guard_risk_tolerance=policy.intent_guard_risk_tolerance if policy else "balanced",
+            intent_guard_action_low=policy.intent_guard_action_low if policy else "ignore",
+            intent_guard_action_medium=policy.intent_guard_action_medium if policy else "clarify",
+            intent_guard_action_high=policy.intent_guard_action_high if policy else "pause_for_approval",
+            intent_guard_action_critical=policy.intent_guard_action_critical if policy else "block",
         ),
     )
 
@@ -207,10 +217,13 @@ def add_message(
     try:
         agent_definition = _get_session_agent_definition(agent, db)
         chat_model = get_agent_chat_model(agent)
+        policy = db.exec(select(models.Policy).where(models.Policy.agent_id == agent.id)).first()
+        guard_model = get_guard_chat_model(agent, policy)
         runtime = AgentRuntime(
             agent_definition=agent_definition,
             chat_model=chat_model,
             db_session=db,
+            guard_model=guard_model,
         )
         result = runtime.run_chat_turn(session_id, _build_conversation_messages(session_id, db))
         session_record.status = result["status"]

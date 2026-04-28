@@ -1,7 +1,44 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, root_validator, validator
+
+
+GUARD_ACTIONS = {
+    "ignore": 0,
+    "clarify": 1,
+    "autonomous_decide": 2,
+    "pause_for_approval": 3,
+    "block": 4,
+}
+GUARD_RISK_TOLERANCES = {"lenient", "balanced", "strict"}
+GUARD_MODEL_MODES = {"dedicated", "same_as_agent"}
+
+
+def validate_guard_action_order(values: dict) -> dict:
+    actions = [
+        values.get("intent_guard_action_low", "ignore"),
+        values.get("intent_guard_action_medium", "clarify"),
+        values.get("intent_guard_action_high", "pause_for_approval"),
+        values.get("intent_guard_action_critical", "block"),
+    ]
+    invalid = [action for action in actions if action not in GUARD_ACTIONS]
+    if invalid:
+        raise ValueError(f"Invalid intent guard action: {invalid[0]}")
+
+    ranks = [GUARD_ACTIONS[action] for action in actions]
+    if ranks != sorted(ranks):
+        raise ValueError("Intent guard actions must get stricter as risk increases")
+
+    tolerance = values.get("intent_guard_risk_tolerance", "balanced")
+    if tolerance not in GUARD_RISK_TOLERANCES:
+        raise ValueError("intent_guard_risk_tolerance must be lenient, balanced, or strict")
+
+    model_mode = values.get("intent_guard_model_mode", "dedicated")
+    if model_mode not in GUARD_MODEL_MODES:
+        raise ValueError("intent_guard_model_mode must be dedicated or same_as_agent")
+
+    return values
 
 
 class AgentBase(BaseModel):
@@ -34,6 +71,10 @@ class AgentRead(AgentBase):
 class AgentPolicySummary(BaseModel):
     frequency_limit: Optional[int] = None
     require_approval_for_all_tool_calls: bool = False
+    intent_guard_enabled: bool = True
+    intent_guard_action_medium: str = "clarify"
+    intent_guard_action_high: str = "pause_for_approval"
+    intent_guard_action_critical: str = "block"
 
 
 class AgentSummaryRead(BaseModel):
@@ -141,6 +182,20 @@ class ToolsUpdate(BaseModel):
 class PolicyBase(BaseModel):
     frequency_limit: Optional[int] = Field(None, gt=0)
     require_approval_for_all_tool_calls: bool = False
+    intent_guard_enabled: bool = True
+    intent_guard_model_mode: str = "dedicated"
+    intent_guard_model: Optional[str] = "gemini-2.5-flash"
+    intent_guard_include_conversation: bool = True
+    intent_guard_include_tool_args: bool = False
+    intent_guard_risk_tolerance: str = "balanced"
+    intent_guard_action_low: str = "ignore"
+    intent_guard_action_medium: str = "clarify"
+    intent_guard_action_high: str = "pause_for_approval"
+    intent_guard_action_critical: str = "block"
+
+    @root_validator
+    def guard_actions_are_ordered(cls, values: dict) -> dict:
+        return validate_guard_action_order(values)
 
 
 class PolicyCreate(PolicyBase):
@@ -167,6 +222,20 @@ class AgentDefinitionPolicy(BaseModel):
     allowed_tool_ids: List[int]
     frequency_limit: Optional[int]
     require_approval_for_all_tool_calls: bool
+    intent_guard_enabled: bool = True
+    intent_guard_model_mode: str = "dedicated"
+    intent_guard_model: Optional[str] = "gemini-2.5-flash"
+    intent_guard_include_conversation: bool = True
+    intent_guard_include_tool_args: bool = False
+    intent_guard_risk_tolerance: str = "balanced"
+    intent_guard_action_low: str = "ignore"
+    intent_guard_action_medium: str = "clarify"
+    intent_guard_action_high: str = "pause_for_approval"
+    intent_guard_action_critical: str = "block"
+
+    @root_validator
+    def guard_actions_are_ordered(cls, values: dict) -> dict:
+        return validate_guard_action_order(values)
 
 
 class AgentDefinition(BaseModel):

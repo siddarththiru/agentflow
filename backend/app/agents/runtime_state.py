@@ -9,6 +9,7 @@ class RuntimeState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     pending_tool_call: Optional[dict]
     pending_tool_decision: Optional[str]
+    pending_guard_decision: Optional[dict]
     execution_status: str
     final_output: Optional[str]
     error: Optional[str]

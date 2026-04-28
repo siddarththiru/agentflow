@@ -10,7 +10,7 @@ from app import models
 from app import schemas
 from app.agents.qa_graph import build_qa_graph
 from app.agents.runtime import AgentRuntime
-from app.config import get_agent_chat_model
+from app.config import get_agent_chat_model, get_guard_chat_model
 from langchain_core.messages import AIMessage, HumanMessage
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -111,6 +111,10 @@ def _persist_resume_assistant_reply(
     session.commit()
 
 
+def _get_policy_for_guard(agent_id: int, session: Session) -> Optional[models.Policy]:
+    return session.exec(select(models.Policy).where(models.Policy.agent_id == agent_id)).first()
+
+
 @router.get("", response_model=List[schemas.AgentSummaryRead])
 def list_agents(session: Session = Depends(get_session)) -> List[schemas.AgentSummaryRead]:
     agents = session.exec(select(models.Agent)).all()
@@ -187,6 +191,10 @@ def list_agents(session: Session = Depends(get_session)) -> List[schemas.AgentSu
                     schemas.AgentPolicySummary(
                         frequency_limit=policy.frequency_limit,
                         require_approval_for_all_tool_calls=policy.require_approval_for_all_tool_calls,
+                        intent_guard_enabled=policy.intent_guard_enabled,
+                        intent_guard_action_medium=policy.intent_guard_action_medium,
+                        intent_guard_action_high=policy.intent_guard_action_high,
+                        intent_guard_action_critical=policy.intent_guard_action_critical,
                     )
                     if policy
                     else None
@@ -497,12 +505,6 @@ def set_policy(
     ).all()
     selected_tool_ids = list(selected_tools)
 
-    if policy_in.require_approval_for_all_tool_calls and not selected_tool_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Agent has no tools and all tool calls require approval – this agent will be unusable.",
-        )
-
     policy = session.exec(select(models.Policy).where(models.Policy.agent_id == agent.id)).first()
     if not policy:
         policy = models.Policy(agent_id=agent.id)
@@ -515,6 +517,16 @@ def set_policy(
         policy.frequency_limit = None
 
     policy.require_approval_for_all_tool_calls = policy_in.require_approval_for_all_tool_calls
+    policy.intent_guard_enabled = policy_in.intent_guard_enabled
+    policy.intent_guard_model_mode = policy_in.intent_guard_model_mode
+    policy.intent_guard_model = policy_in.intent_guard_model
+    policy.intent_guard_include_conversation = policy_in.intent_guard_include_conversation
+    policy.intent_guard_include_tool_args = policy_in.intent_guard_include_tool_args
+    policy.intent_guard_risk_tolerance = policy_in.intent_guard_risk_tolerance
+    policy.intent_guard_action_low = policy_in.intent_guard_action_low
+    policy.intent_guard_action_medium = policy_in.intent_guard_action_medium
+    policy.intent_guard_action_high = policy_in.intent_guard_action_high
+    policy.intent_guard_action_critical = policy_in.intent_guard_action_critical
 
     agent.updated_at = datetime.utcnow()
     session.add(policy)
@@ -569,6 +581,16 @@ def get_definition(agent_id: int, session: Session = Depends(get_session)) -> sc
         allowed_tool_ids=[tool.id for tool in tools],
         frequency_limit=policy.frequency_limit,
         require_approval_for_all_tool_calls=policy.require_approval_for_all_tool_calls,
+        intent_guard_enabled=policy.intent_guard_enabled,
+        intent_guard_model_mode=policy.intent_guard_model_mode,
+        intent_guard_model=policy.intent_guard_model,
+        intent_guard_include_conversation=policy.intent_guard_include_conversation,
+        intent_guard_include_tool_args=policy.intent_guard_include_tool_args,
+        intent_guard_risk_tolerance=policy.intent_guard_risk_tolerance,
+        intent_guard_action_low=policy.intent_guard_action_low,
+        intent_guard_action_medium=policy.intent_guard_action_medium,
+        intent_guard_action_high=policy.intent_guard_action_high,
+        intent_guard_action_critical=policy.intent_guard_action_critical,
     )
 
     return schemas.AgentDefinition(
@@ -636,6 +658,7 @@ def run_agent(
     # Get chat model
     try:
         chat_model = get_agent_chat_model(agent)
+        guard_model = get_guard_chat_model(agent, _get_policy_for_guard(request.agent_id, session))
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -646,7 +669,8 @@ def run_agent(
     runtime = AgentRuntime(
         agent_definition=agent_definition,
         chat_model=chat_model,
-        db_session=session
+        db_session=session,
+        guard_model=guard_model,
     )
     
     import uuid
@@ -723,6 +747,7 @@ def resume_agent(
     # Get chat model
     try:
         chat_model = get_agent_chat_model(agent)
+        guard_model = get_guard_chat_model(agent, _get_policy_for_guard(session_record.agent_id, session))
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -733,7 +758,8 @@ def resume_agent(
     runtime = AgentRuntime(
         agent_definition=agent_definition,
         chat_model=chat_model,
-        db_session=session
+        db_session=session,
+        guard_model=guard_model,
     )
     
     # Resume session

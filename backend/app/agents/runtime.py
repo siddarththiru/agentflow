@@ -16,6 +16,7 @@ from langchain_core.messages import (
 from sqlmodel import Session, select
 
 from app.agents.event_logger import EventLogger
+from app.agents.intent_guard import IntentGuard, IntentGuardResult
 from app.agents.interception import InterceptionHook, InterceptionDecision
 from app.agents.runtime_state import RuntimeState
 from app.agents.tool_adapter import ToolAdapter
@@ -29,7 +30,8 @@ class AgentRuntime:
         self,
         agent_definition: AgentDefinition,
         chat_model: BaseChatModel,
-        db_session: Session
+        db_session: Session,
+        guard_model: BaseChatModel | None = None
     ):
         self.agent_def = agent_definition
         self.db_session = db_session
@@ -42,6 +44,7 @@ class AgentRuntime:
             self._tool_function_name(tool): tool.name for tool in agent_definition.tools
         }
         self.chat_model = self._bind_tools(chat_model)
+        self.guard_model = guard_model or chat_model
         
         self.system_prompt = self._build_system_prompt()
         self.last_state_snapshot = None
@@ -53,6 +56,7 @@ class AgentRuntime:
             "error": state.get("error"),
             "pending_tool_call": state.get("pending_tool_call"),
             "pending_tool_decision": state.get("pending_tool_decision"),
+            "pending_guard_decision": state.get("pending_guard_decision"),
         }
 
     def _build_tool_specs(self) -> List[Dict[str, Any]]:
@@ -84,7 +88,7 @@ class AgentRuntime:
     def _build_runtime_components(
         self,
         session_id: str,
-    ) -> tuple[ToolAdapter, InterceptionHook]:
+    ) -> tuple[ToolAdapter, InterceptionHook, IntentGuard]:
         tool_adapter = ToolAdapter(self.tools_dict)
         interception_hook = InterceptionHook(
             session_id=session_id,
@@ -94,7 +98,8 @@ class AgentRuntime:
             frequency_limit=self.agent_def.policy.frequency_limit,
             require_approval_for_all=self.agent_def.policy.require_approval_for_all_tool_calls
         )
-        return tool_adapter, interception_hook
+        intent_guard = IntentGuard(self.agent_def, self.guard_model)
+        return tool_adapter, interception_hook, intent_guard
     
     def _build_system_prompt(self) -> str:
         prompt_parts = [
@@ -128,7 +133,7 @@ class AgentRuntime:
             user_input=user_input
         )
         
-        tool_adapter, interception_hook = self._build_runtime_components(session_id)
+        tool_adapter, interception_hook, intent_guard = self._build_runtime_components(session_id)
         
         # Initialize state
         initial_state: RuntimeState = {
@@ -140,6 +145,7 @@ class AgentRuntime:
             ],
             "pending_tool_call": None,
             "pending_tool_decision": None,
+            "pending_guard_decision": None,
             "execution_status": "running",
             "final_output": None,
             "error": None
@@ -147,7 +153,7 @@ class AgentRuntime:
         
         try:
             self.last_state_snapshot = None
-            final_state = self._run_simple_turn(initial_state, tool_adapter, interception_hook)
+            final_state = self._run_simple_turn(initial_state, tool_adapter, interception_hook, intent_guard)
             status = final_state.get("execution_status", "failed")
             if status == "paused":
                 self._save_paused_state(final_state)
@@ -198,7 +204,7 @@ class AgentRuntime:
             }
 
     def run_chat_turn(self, session_id: str, conversation_messages: List[HumanMessage | AIMessage]) -> Dict[str, Any]:
-        tool_adapter, interception_hook = self._build_runtime_components(session_id)
+        tool_adapter, interception_hook, intent_guard = self._build_runtime_components(session_id)
 
         initial_state: RuntimeState = {
             "session_id": session_id,
@@ -206,6 +212,7 @@ class AgentRuntime:
             "messages": [SystemMessage(content=self.system_prompt), *conversation_messages],
             "pending_tool_call": None,
             "pending_tool_decision": None,
+            "pending_guard_decision": None,
             "execution_status": "running",
             "final_output": None,
             "error": None,
@@ -213,7 +220,7 @@ class AgentRuntime:
 
         try:
             self.last_state_snapshot = None
-            final_state = self._run_simple_turn(initial_state, tool_adapter, interception_hook)
+            final_state = self._run_simple_turn(initial_state, tool_adapter, interception_hook, intent_guard)
             status = final_state.get("execution_status", "failed")
             if status == "paused":
                 self._save_paused_state(final_state)
@@ -248,12 +255,21 @@ class AgentRuntime:
         initial_state: RuntimeState,
         tool_adapter: ToolAdapter,
         interception_hook: InterceptionHook,
+        intent_guard: IntentGuard,
+        *,
+        skip_initial_guard: bool = False,
     ) -> RuntimeState:
-        state = self._merge_state(initial_state, self._reason_node(initial_state))
+        state = initial_state
+        if not skip_initial_guard:
+            state = self._merge_state(state, self._intent_guard_node(state, intent_guard, checkpoint="prompt"))
+            if state.get("execution_status") != "running":
+                return state
+
+        state = self._merge_state(state, self._reason_node(state))
         if state.get("execution_status") != "running":
             return state
 
-        state = self._merge_state(state, self._decide_action_node(state, interception_hook))
+        state = self._merge_state(state, self._decide_action_node(state, interception_hook, intent_guard))
         if state.get("execution_status") != "running":
             return state
 
@@ -266,9 +282,150 @@ class AgentRuntime:
             if state.get("execution_status") != "running":
                 return state
 
-            state = self._merge_state(state, self._decide_action_node(state, interception_hook))
+            state = self._merge_state(state, self._decide_action_node(state, interception_hook, intent_guard))
 
         return state
+
+    def _intent_guard_node(
+        self,
+        state: RuntimeState,
+        intent_guard: IntentGuard,
+        *,
+        checkpoint: str,
+        tool_name: str | None = None,
+        tool_args: Dict[str, Any] | None = None,
+        tool_id: int | None = None,
+    ) -> RuntimeState:
+        if state.get("execution_status") != "running":
+            return self._passthrough_terminal_state(state)
+
+        if not intent_guard.is_enabled():
+            return {}
+
+        self.logger.log_node_transition(
+            session_id=state["session_id"],
+            agent_id=state["agent_id"],
+            from_node="previous",
+            to_node=f"intent_guard_{checkpoint}"
+        )
+
+        try:
+            result = intent_guard.classify(
+                list(state["messages"]),
+                checkpoint=checkpoint,
+                tool_name=tool_name,
+                tool_args=tool_args,
+            )
+        except Exception as exc:
+            result = intent_guard.failure_result(exc)
+
+        action = intent_guard.action_for_risk(result.risk_level)
+        self._log_intent_guard_decision(state, result, action, checkpoint, tool_name)
+
+        if action == "ignore":
+            return {}
+
+        if action == "clarify":
+            if result.risk_level == "low":
+                clarification = "How can I help with that?"
+            else:
+                clarification = result.clarifying_question or "Can you clarify the safe, legitimate goal for this request?"
+            return {
+                "execution_status": "completed",
+                "final_output": clarification,
+                "error": None,
+            }
+
+        if action == "autonomous_decide":
+            if checkpoint == "tool":
+                return {}
+            guidance = (
+                "Security review for this request:\n"
+                f"- Risk: {result.risk_level}\n"
+                f"- Intent: {result.intent}\n"
+                f"- Reason: {result.explanation}\n"
+                "Proceed only if you can satisfy the request safely and within policy. Otherwise refuse or ask for clarification."
+            )
+            return {"messages": [SystemMessage(content=guidance)]}
+
+        if action == "pause_for_approval":
+            pending_guard = result.to_log_data(action, checkpoint, tool_name)
+            pending_guard["tool_id"] = tool_id
+            self._create_guard_approval(state, result, checkpoint, tool_name, tool_id)
+            return {
+                "execution_status": "paused",
+                "error": f"Intent guard paused execution: {result.explanation}",
+                "pending_guard_decision": pending_guard,
+            }
+
+        if action == "block":
+            return {
+                "execution_status": "terminated",
+                "error": f"Intent guard blocked execution: {result.explanation}",
+                "pending_guard_decision": result.to_log_data(action, checkpoint, tool_name),
+            }
+
+        return {}
+
+    def _log_intent_guard_decision(
+        self,
+        state: RuntimeState,
+        result: IntentGuardResult,
+        action: str,
+        checkpoint: str,
+        tool_name: str | None,
+    ) -> None:
+        self.logger.emit_event(
+            session_id=state["session_id"],
+            agent_id=state["agent_id"],
+            event_type="intent_guard_decision",
+            event_data=result.to_log_data(action, checkpoint, tool_name),
+        )
+
+    def _create_guard_approval(
+        self,
+        state: RuntimeState,
+        result: IntentGuardResult,
+        checkpoint: str,
+        tool_name: str | None,
+        tool_id: int | None,
+    ) -> None:
+        with Session(engine) as session:
+            approval = models.Approval(
+                session_id=state["session_id"],
+                agent_id=state["agent_id"],
+                tool_id=tool_id if tool_id is not None else 0,
+                tool_name=tool_name or "Intent Guard",
+                status="pending",
+                requested_at=datetime.utcnow(),
+            )
+            session.add(approval)
+
+            stmt = select(models.Session).where(models.Session.session_id == state["session_id"])
+            session_record = session.exec(stmt).first()
+            if session_record:
+                session_record.status = "paused"
+                session_record.updated_at = datetime.utcnow()
+                session.add(session_record)
+
+            session.commit()
+
+        self.logger.emit_event(
+            session_id=state["session_id"],
+            agent_id=state["agent_id"],
+            event_type="approval_requested",
+            event_data={
+                "source": "intent_guard",
+                "checkpoint": checkpoint,
+                "tool_name": tool_name,
+                "tool_id": tool_id,
+                "risk_level": result.risk_level,
+                "intent": result.intent,
+                "confidence": result.confidence,
+                "reason": result.explanation,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
     
     def _reason_node(self, state: RuntimeState) -> RuntimeState:
         if state.get("execution_status") != "running":
@@ -307,7 +464,8 @@ class AgentRuntime:
     def _decide_action_node(
         self,
         state: RuntimeState,
-        interception_hook: InterceptionHook
+        interception_hook: InterceptionHook,
+        intent_guard: IntentGuard
     ) -> RuntimeState:
         if state.get("execution_status") != "running":
             return self._passthrough_terminal_state(state)
@@ -347,6 +505,20 @@ class AgentRuntime:
                         "pending_tool_call": None,
                         "pending_tool_decision": None
                     }
+
+                guard_update = self._intent_guard_node(
+                    state,
+                    intent_guard,
+                    checkpoint="tool",
+                    tool_name=tool_name,
+                    tool_args=pending_call.get("args", {}),
+                    tool_id=tool_def.id,
+                )
+                if guard_update.get("execution_status") and guard_update.get("execution_status") != "running":
+                    if guard_update.get("execution_status") == "paused":
+                        guard_update["pending_tool_call"] = pending_call
+                        guard_update["pending_tool_decision"] = "pause"
+                    return guard_update
 
                 decision = interception_hook.intercept(
                     tool_name,
@@ -507,6 +679,7 @@ class AgentRuntime:
             "messages": messages_data,
             "pending_tool_call": state.get("pending_tool_call"),
             "pending_tool_decision": state.get("pending_tool_decision"),
+            "pending_guard_decision": state.get("pending_guard_decision"),
             "execution_status": state.get("execution_status"),
             "error": state.get("error")
         }
@@ -545,7 +718,7 @@ class AgentRuntime:
             raise ValueError(f"Session {session_id} is not approved (approval status: {approval.status})")
         
         # 3. Restore the paused state snapshot.
-        tool_adapter, interception_hook = self._build_runtime_components(session_id)
+        tool_adapter, interception_hook, intent_guard = self._build_runtime_components(session_id)
 
         if not session_record.state_snapshot:
             raise ValueError(f"No checkpoint or snapshot found for session {session_id}")
@@ -558,14 +731,57 @@ class AgentRuntime:
             "messages": messages,
             "pending_tool_call": state_data.get("pending_tool_call"),
             "pending_tool_decision": state_data.get("pending_tool_decision"),
+            "pending_guard_decision": state_data.get("pending_guard_decision"),
             "execution_status": state_data.get("execution_status", "paused"),
             "final_output": None,
             "error": state_data.get("error")
         }
 
         pending_tool_call = current_state.get("pending_tool_call")
-        if not pending_tool_call:
-            raise ValueError(f"No pending tool call found for session {session_id}")
+        pending_guard_decision = current_state.get("pending_guard_decision")
+        if not pending_tool_call and not pending_guard_decision:
+            raise ValueError(f"No pending tool call or guard decision found for session {session_id}")
+
+        if pending_guard_decision and not pending_tool_call:
+            resumed_state: RuntimeState = {
+                **current_state,
+                "pending_guard_decision": None,
+                "execution_status": "running",
+                "final_output": None,
+                "error": None,
+            }
+            self.last_state_snapshot = None
+            final_state = self._run_simple_turn(
+                resumed_state,
+                tool_adapter,
+                interception_hook,
+                intent_guard,
+                skip_initial_guard=True,
+            )
+            status = final_state.get("execution_status", "failed")
+
+            if status == "paused":
+                self._save_paused_state(final_state)
+                session_record.status = "paused"
+            else:
+                session_record.status = status
+                session_record.state_snapshot = None
+            session_record.updated_at = datetime.now(timezone.utc)
+            self.db_session.add(session_record)
+            self.db_session.commit()
+            self.logger.log_session_end(
+                session_id=session_id,
+                agent_id=self.agent_def.agent_id,
+                status=status,
+                final_output=final_state.get("final_output"),
+                error=final_state.get("error"),
+            )
+            return {
+                "session_id": session_id,
+                "status": status,
+                "final_output": final_state.get("final_output"),
+                "error": final_state.get("error"),
+            }
 
         # 4. Execute the approved tool (bypass interception this time)
         tool_name = self._resolve_tool_name(pending_tool_call.get("name", "unknown"))
@@ -607,7 +823,7 @@ class AgentRuntime:
             }
 
             self.last_state_snapshot = None
-            final_state = self._run_simple_turn(resumed_state, tool_adapter, interception_hook)
+            final_state = self._run_simple_turn(resumed_state, tool_adapter, interception_hook, intent_guard, skip_initial_guard=True)
             status = final_state.get("execution_status", "failed")
             if status == "paused":
                 self._save_paused_state(final_state)

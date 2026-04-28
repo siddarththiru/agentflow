@@ -20,7 +20,7 @@ class ApprovalResponse(BaseModel):
     id: int
     session_id: str
     agent_id: int
-    tool_id: int
+    tool_id: Optional[int] = None
     tool_name: str
     status: str
     requested_at: datetime
@@ -28,6 +28,7 @@ class ApprovalResponse(BaseModel):
     decided_by: Optional[str] = None
     decision_reason: Optional[str] = None
     risk_level: Optional[str] = None  # From threat classification
+    approval_type: str = "Policy Approval"
 
     class Config:
         orm_mode = True
@@ -66,6 +67,10 @@ def _get_threat_classification(session_id: str, db: Session) -> Optional[str]:
         return event_data.get("risk_level")
     
     return None
+
+
+def _approval_type(approval: models.Approval) -> str:
+    return "Safety Approval" if approval.tool_name == "Intent Guard" else "Policy Approval"
 
 def _log_approval_decision(
     session_id: str,
@@ -123,6 +128,7 @@ def list_approvals(
         risk_level = _get_threat_classification(approval.session_id, db)
         result = ApprovalResponse.from_orm(approval)
         result.risk_level = risk_level
+        result.approval_type = _approval_type(approval)
         results.append(result)
     
     return results
@@ -143,6 +149,7 @@ def get_approval(
     
     result = ApprovalResponse.from_orm(approval)
     result.risk_level = risk_level
+    result.approval_type = _approval_type(approval)
     return result
 
 @router.post("/{session_id}/approve", response_model=ApprovalResponse)
@@ -167,6 +174,7 @@ def approve_session(
         risk_level = _get_threat_classification(session_id, db)
         result = ApprovalResponse.from_orm(approval)
         result.risk_level = risk_level
+        result.approval_type = _approval_type(approval)
         return result
     
     # Cannot approve if already denied
@@ -200,6 +208,7 @@ def approve_session(
     risk_level = _get_threat_classification(session_id, db)
     result = ApprovalResponse.from_orm(approval)
     result.risk_level = risk_level
+    result.approval_type = _approval_type(approval)
     return result
 
 @router.post("/{session_id}/deny", response_model=ApprovalResponse)
@@ -219,6 +228,7 @@ def deny_session(
         risk_level = _get_threat_classification(session_id, db)
         result = ApprovalResponse.from_orm(approval)
         result.risk_level = risk_level
+        result.approval_type = _approval_type(approval)
         return result
     
     # Session must be paused to deny
@@ -281,4 +291,5 @@ def deny_session(
     risk_level = _get_threat_classification(session_id, db)
     result = ApprovalResponse.from_orm(approval)
     result.risk_level = risk_level
+    result.approval_type = _approval_type(approval)
     return result

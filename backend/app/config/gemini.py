@@ -52,3 +52,19 @@ def get_agent_chat_model(
     if not model_name or not is_gemini_model_name(model_name):
         model_name = DEFAULT_GEMINI_MODEL
     return build_gemini_chat_model(model_name=model_name, temperature=temperature, **kwargs)
+
+
+def get_guard_chat_model(
+    agent: "models.Agent",
+    policy: Any,
+    *,
+    temperature: Optional[float] = 0,
+    **kwargs: Any,
+) -> BaseChatModel:
+    if getattr(policy, "intent_guard_model_mode", "dedicated") == "same_as_agent":
+        return get_agent_chat_model(agent, temperature=temperature, **kwargs)
+
+    model_name = (getattr(policy, "intent_guard_model", None) or DEFAULT_GEMINI_MODEL).strip()
+    if not is_gemini_model_name(model_name):
+        model_name = DEFAULT_GEMINI_MODEL
+    return build_gemini_chat_model(model_name=model_name, temperature=temperature, **kwargs)

@@ -10,6 +10,7 @@ _BLOCKED_FIELDS = frozenset({
     "params", "parameters", "raw_output", "output", "prompt", "user_input",
     "result", "final_output", "traceback", "stack_trace", "credentials", "password", "token", "secret",
     "api_key", "apikey",
+    "conversation", "messages", "tool_args",
 })
 
 def _safe_metadata(event_data: Dict[str, Any], event_type: str) -> Dict[str, Any]:

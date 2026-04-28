@@ -8,6 +8,12 @@ class AgentTool(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     agent_id: int = Field(foreign_key="agents.id")
     tool_id: int = Field(foreign_key="tools.id")
+    guard_enabled: Optional[bool] = None
+    guard_include_tool_args: Optional[bool] = None
+    guard_action_low: Optional[str] = None
+    guard_action_medium: Optional[str] = None
+    guard_action_high: Optional[str] = None
+    guard_action_critical: Optional[str] = None
     # Link back to parent records; no cascade from AgentTool to Agent (only Agent → AgentTool)
     agent: "Agent" = Relationship(back_populates="tools")
     tool: "Tool" = Relationship(back_populates="agents")
@@ -48,6 +54,16 @@ class Policy(SQLModel, table=True):
     agent_id: int = Field(foreign_key="agents.id", unique=True)
     frequency_limit: Optional[int] = None
     require_approval_for_all_tool_calls: bool = Field(default=False)
+    intent_guard_enabled: bool = Field(default=True)
+    intent_guard_model_mode: str = Field(default="dedicated")
+    intent_guard_model: Optional[str] = Field(default="gemini-2.5-flash")
+    intent_guard_include_conversation: bool = Field(default=True)
+    intent_guard_include_tool_args: bool = Field(default=False)
+    intent_guard_risk_tolerance: str = Field(default="balanced")
+    intent_guard_action_low: str = Field(default="ignore")
+    intent_guard_action_medium: str = Field(default="clarify")
+    intent_guard_action_high: str = Field(default="pause_for_approval")
+    intent_guard_action_critical: str = Field(default="block")
 
     agent: Agent = Relationship(back_populates="policy")
 
@@ -97,7 +113,7 @@ class Approval(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: str = Field(foreign_key="sessions.session_id", index=True)
     agent_id: int = Field(foreign_key="agents.id")
-    tool_id: int = Field(foreign_key="tools.id")
+    tool_id: Optional[int] = Field(default=None, foreign_key="tools.id")
     tool_name: str
     status: str = Field(default="pending")  # pending | approved | denied
     requested_at: datetime = Field(default_factory=datetime.utcnow)
