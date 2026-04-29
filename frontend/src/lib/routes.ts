@@ -27,11 +27,6 @@ export const navItems: AppNavItem[] = [
     description: "Review pending human-in-loop tasks",
   },
   {
-    label: "Investigation",
-    path: "/investigation",
-    description: "Inspect escalations and evidence",
-  },
-  {
     label: "Notifications",
     path: "/notifications",
     description: "Manage alert routing",
@@ -42,3 +37,4 @@ export const navItems: AppNavItem[] = [
     description: "Configure connected toolchains",
   },
 ];
+

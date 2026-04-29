@@ -4,7 +4,6 @@ import {
   FiClipboard,
   FiGrid,
   FiLayers,
-  FiSearch,
   FiSettings,
   FiTool,
 } from "react-icons/fi";
@@ -17,7 +16,6 @@ const navIconMap = {
   "/builder": FiTool,
   "/sessions": FiLayers,
   "/approvals": FiClipboard,
-  "/investigation": FiSearch,
   "/notifications": FiBell,
   "/tools": FiSettings,
 };

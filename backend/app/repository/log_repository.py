@@ -45,7 +45,6 @@ class LogRepository:
         "tool_result",
         "enforcement_decision",
         "runtime_error",
-        "threat_classification",
         "intent_guard_decision",
         "approval_requested",
         "approval_decision",

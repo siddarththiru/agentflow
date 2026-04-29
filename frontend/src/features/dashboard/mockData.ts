@@ -50,14 +50,6 @@ export const dashboardStats: DashboardStat[] = [
     icon: "clock",
   },
   {
-    label: "Escalated investigations",
-    value: "04",
-    meta: "Within expected weekly range",
-    status: "warning",
-    statusLabel: "Watch",
-    icon: "branch",
-  },
-  {
     label: "Failed tool checks",
     value: "01",
     meta: "Mailer connector retried",
@@ -74,13 +66,6 @@ export const recentAlerts: AlertItem[] = [
     detail: "Approval confidence dropped below threshold for the finance workflow.",
     category: "approval",
     status: "warning",
-  },
-  {
-    id: "a2",
-    title: "Risk classification updated",
-    detail: "New model weights deployed for high-priority session scoring.",
-    category: "investigation",
-    status: "info",
   },
   {
     id: "a3",
@@ -133,12 +118,6 @@ export const quickActions: QuickActionItem[] = [
     label: "Review pending approvals",
     description: "Handle urgent review tasks before SLA thresholds.",
     route: "/approvals",
-  },
-  {
-    id: "qa3",
-    label: "Open investigation queue",
-    description: "Inspect incidents and route ownership quickly.",
-    route: "/investigation",
   },
   {
     id: "qa4",

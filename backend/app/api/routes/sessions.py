@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from langchain_core.messages import AIMessage, HumanMessage
@@ -141,6 +141,54 @@ def _get_session_agent_definition(agent: models.Agent, db: Session) -> schemas.A
             intent_guard_action_critical=policy.intent_guard_action_critical if policy else "block",
         ),
     )
+
+
+@router.get("")
+def list_sessions(
+    agent_id: Optional[int] = None,
+    status: Optional[str] = None,
+    limit: int = 25,
+    offset: int = 0,
+    db: Session = Depends(get_session)
+) -> dict:
+    """List sessions with optional filtering by agent and status."""
+    
+    # Build query
+    stmt = select(models.Session)
+    
+    if agent_id is not None:
+        stmt = stmt.where(models.Session.agent_id == agent_id)
+    if status is not None:
+        stmt = stmt.where(models.Session.status == status)
+    
+    # Get total count before pagination
+    all_sessions = db.exec(stmt).all()
+    total = len(all_sessions)
+    
+    # Apply pagination
+    limit = max(1, min(limit, 1000))
+    offset = max(0, offset)
+    
+    all_sessions_sorted = sorted(all_sessions, key=lambda s: s.created_at, reverse=True)
+    paginated = all_sessions_sorted[offset:offset + limit]
+    
+    return {
+        "sessions": [
+            schemas.SessionSummaryRead(
+                session_id=s.session_id,
+                agent_id=s.agent_id,
+                title=s.title,
+                status=s.status,
+                created_at=s.created_at,
+                updated_at=s.updated_at,
+            )
+            for s in paginated
+        ],
+        "total": total,
+        "count": len(paginated),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/{session_id}/messages", response_model=List[schemas.ChatMessageRead])

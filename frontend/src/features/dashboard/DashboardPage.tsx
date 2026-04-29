@@ -142,7 +142,7 @@ export const DashboardPage = () => {
                 Welcome back. Your agent operations look steady today.
               </Text>
               <Text color="text.secondary" maxW="680px">
-                Focus on pending approvals and investigation escalations first, then continue builder rollout for the new incident workflow.
+                Focus on pending approvals first, then continue builder rollout for the new incident workflow.
               </Text>
             </VStack>
           </GridItem>

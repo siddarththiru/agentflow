@@ -24,38 +24,13 @@ def _safe_json_load(value: str) -> Dict[str, Any]:
         return {}
 
 
-def _extract_latest_risks(logs: List[models.Log]) -> Tuple[Dict[str, str], Dict[int, str]]:
-    session_risk: Dict[str, str] = {}
-    agent_risk: Dict[int, str] = {}
-    latest_session_ts: Dict[str, datetime] = {}
-    latest_agent_ts: Dict[int, datetime] = {}
-
-    for log in logs:
-        data = _safe_json_load(log.event_data)
-        risk_level = str(data.get("risk_level", "")).lower().strip()
-        if not risk_level:
-            continue
-
-        if log.session_id not in latest_session_ts or log.timestamp > latest_session_ts[log.session_id]:
-            latest_session_ts[log.session_id] = log.timestamp
-            session_risk[log.session_id] = risk_level
-
-        if log.agent_id not in latest_agent_ts or log.timestamp > latest_agent_ts[log.agent_id]:
-            latest_agent_ts[log.agent_id] = log.timestamp
-            agent_risk[log.agent_id] = risk_level
-
-    return session_risk, agent_risk
-
-
 def _compute_health_status(
     latest_session_status: Optional[str],
     pending_approvals: int,
-    latest_risk_level: Optional[str],
 ) -> str:
-    risk = (latest_risk_level or "").lower()
     session_status = (latest_session_status or "").lower()
 
-    if risk in {"critical", "high"} or session_status in {"failed", "terminated"}:
+    if session_status in {"failed", "terminated"}:
         return "risk"
     if pending_approvals > 0 or session_status == "paused":
         return "attention"
@@ -140,12 +115,6 @@ def list_agents(session: Session = Depends(get_session)) -> List[schemas.AgentSu
             models.Approval.status == "pending",
         )
     ).all()
-    classification_logs = session.exec(
-        select(models.Log).where(
-            models.Log.agent_id.in_(agent_ids),
-            models.Log.event_type == "threat_classification",
-        )
-    ).all()
 
     sessions_by_agent: Dict[int, List[models.Session]] = {}
     for session_record in sessions:
@@ -161,15 +130,12 @@ def list_agents(session: Session = Depends(get_session)) -> List[schemas.AgentSu
     for approval in pending_approvals:
         pending_by_agent[approval.agent_id] = pending_by_agent.get(approval.agent_id, 0) + 1
 
-    _, latest_risk_by_agent = _extract_latest_risks(classification_logs)
-
     summaries: List[schemas.AgentSummaryRead] = []
     for agent in sorted(agents, key=lambda item: item.updated_at, reverse=True):
         agent_id = int(agent.id)
         agent_sessions = sessions_by_agent.get(agent_id, [])
         latest_session = max(agent_sessions, key=lambda item: item.updated_at) if agent_sessions else None
         latest_status = latest_session.status if latest_session else None
-        latest_risk = latest_risk_by_agent.get(agent_id)
         pending_count = pending_by_agent.get(agent_id, 0)
         policy = policy_by_agent.get(agent_id)
 
@@ -185,8 +151,6 @@ def list_agents(session: Session = Depends(get_session)) -> List[schemas.AgentSu
                 tools_count=tools_count_by_agent.get(agent_id, 0),
                 pending_approvals=pending_count,
                 latest_session_status=latest_status,
-                health_status=_compute_health_status(latest_status, pending_count, latest_risk),
-                latest_risk_level=latest_risk,
                 policy=(
                     schemas.AgentPolicySummary(
                         frequency_limit=policy.frequency_limit,
@@ -300,14 +264,6 @@ def get_agent_profile(agent_id: int, session: Session = Depends(get_session)) ->
         .where(models.Approval.agent_id == agent_id)
         .order_by(models.Approval.requested_at.desc())
     ).all()
-    classification_logs = session.exec(
-        select(models.Log)
-        .where(models.Log.agent_id == agent_id, models.Log.event_type == "threat_classification")
-        .order_by(models.Log.timestamp.desc())
-    ).all()
-
-    latest_risk_by_session, latest_risk_by_agent = _extract_latest_risks(classification_logs)
-    latest_agent_risk = latest_risk_by_agent.get(agent_id)
 
     sorted_sessions = sorted(sessions, key=lambda item: item.updated_at, reverse=True)
     recent_sessions = [
@@ -316,7 +272,6 @@ def get_agent_profile(agent_id: int, session: Session = Depends(get_session)) ->
             status=session_record.status,
             created_at=session_record.created_at,
             updated_at=session_record.updated_at,
-            latest_risk_level=latest_risk_by_session.get(session_record.session_id),
         )
         for session_record in sorted_sessions[:8]
     ]
@@ -331,23 +286,9 @@ def get_agent_profile(agent_id: int, session: Session = Depends(get_session)) ->
             decided_at=approval.decided_at,
             decided_by=approval.decided_by,
             decision_reason=approval.decision_reason,
-            risk_level=latest_risk_by_session.get(approval.session_id),
         )
         for approval in approvals[:8]
     ]
-
-    latest_classifications: List[schemas.AgentLatestClassificationRead] = []
-    for log in classification_logs[:8]:
-        data = _safe_json_load(log.event_data)
-        latest_classifications.append(
-            schemas.AgentLatestClassificationRead(
-                session_id=log.session_id,
-                risk_level=data.get("risk_level"),
-                confidence=data.get("confidence"),
-                explanation=data.get("explanation"),
-                timestamp=log.timestamp,
-            )
-        )
 
     pending_approvals = sum(1 for approval in approvals if approval.status == "pending")
     latest_session_status = sorted_sessions[0].status if sorted_sessions else None
@@ -361,12 +302,10 @@ def get_agent_profile(agent_id: int, session: Session = Depends(get_session)) ->
         policy=schemas.PolicyRead.from_orm(policy) if policy else None,
         tools=[schemas.ToolRead.from_orm(tool) for tool in tools],
         definition=definition,
-        health_status=_compute_health_status(latest_session_status, pending_approvals, latest_agent_risk),
         sessions_count=len(sessions),
         pending_approvals=pending_approvals,
         recent_sessions=recent_sessions,
         recent_approvals=recent_approvals,
-        latest_classifications=latest_classifications,
     )
 
 @router.patch("/{agent_id}", response_model=schemas.AgentRead)

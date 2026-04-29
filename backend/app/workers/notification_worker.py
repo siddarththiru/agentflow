@@ -78,12 +78,6 @@ class NotificationWorker:
         if log.event_type == "approval_requested":
             return [self._approval_alert(log)]
 
-        if log.event_type == "threat_classification":
-            risk = str(log.event_data.get("risk_level", "")).lower()
-            if risk in {"high", "critical"}:
-                return [self._high_risk_alert(log)]
-            return []
-
         if log.event_type == "enforcement_decision":
             decision = str(log.event_data.get("decision", "")).lower()
             if decision == "block":
@@ -103,19 +97,6 @@ class NotificationWorker:
             "agent_id": log.agent_id,
             "session_id": log.session_id,
             "tool_name": log.event_data.get("tool_name"),
-            "timestamp": self._iso(log.timestamp),
-            "risk_level": self._latest_session_risk(log.session_id),
-        }
-
-    def _high_risk_alert(self, log: LogQuery) -> Dict[str, Any]:
-        return {
-            "title": "High risk activity detected",
-            "event_type": "threat_classification",
-            "agent_id": log.agent_id,
-            "session_id": log.session_id,
-            "risk_level": log.event_data.get("risk_level"),
-            "explanation": log.event_data.get("explanation"),
-            "confidence": log.event_data.get("confidence"),
             "timestamp": self._iso(log.timestamp),
         }
 
@@ -164,16 +145,6 @@ class NotificationWorker:
             "timestamp": self._iso(log.timestamp),
         }
 
-    def _latest_session_risk(self, session_id: str) -> Optional[str]:
-        logs, _ = self.repo.get_logs(
-            session_id=session_id,
-            event_type="threat_classification",
-            limit=1,
-        )
-        if not logs:
-            return None
-        return logs[0].event_data.get("risk_level")
 
-    @staticmethod
     def _iso(value: datetime) -> str:
         return value.isoformat()

@@ -254,10 +254,6 @@ export const SessionsPage = () => {
           closeModal();
           navigate(`/approvals?sessionId=${sessionId}`);
         }}
-        onOpenInvestigation={(sessionId) => {
-          closeModal();
-          navigate(`/investigation?sessionId=${sessionId}`);
-        }}
         onResume={handleResume}
       />
     </VStack>

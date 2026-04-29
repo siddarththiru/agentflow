@@ -6,7 +6,6 @@ import { AgentsPage } from "../features/agents/AgentsPage";
 import { AgentChatPage } from "../features/agent-chat/AgentChatPage";
 import { SessionsPage } from "../features/sessions/SessionsPage";
 import { ApprovalsPage } from "../features/approvals/ApprovalsPage";
-import { InvestigationPage } from "../features/investigation/InvestigationPage";
 import { NotificationsPage } from "../features/notifications/NotificationsPage";
 import { ToolsPage } from "../features/tools/ToolsPage";
 
@@ -21,7 +20,6 @@ export const AppRouter = () => {
         <Route path="agents/:agentId/chat" element={<AgentChatPage />} />
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="approvals" element={<ApprovalsPage />} />
-        <Route path="investigation" element={<InvestigationPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="tools" element={<ToolsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

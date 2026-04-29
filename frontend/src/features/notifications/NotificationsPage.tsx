@@ -30,10 +30,6 @@ import {
   getLogStats,
   getSessionLogs,
 } from "../reporting/api";
-import {
-  listInvestigationApprovals,
-  listInvestigationClassifications,
-} from "../investigation/api";
 import { getNotificationCenterData } from "./api";
 import { NotificationAlert } from "./types";
 
@@ -167,37 +163,9 @@ export const NotificationsPage = () => {
     downloadJson(`agentflow-agent-${reportFilter.agentId.trim()}-logs.json`, response);
   };
 
-  const exportClassifications = async () => {
-    const response = await listInvestigationClassifications({ limit: 300, offset: 0 });
-    downloadCsv(
-      "agentflow-classifications.csv",
-      response.classifications.map((item) => ({
-        session_id: item.session_id,
-        agent_id: item.agent_id,
-        risk_level: item.risk_level,
-        confidence: item.confidence,
-        explanation: item.explanation,
-        timestamp: item.timestamp,
-      }))
-    );
-  };
 
-  const exportApprovals = async () => {
-    const response = await listInvestigationApprovals({ limit: 300, offset: 0 });
-    downloadCsv(
-      "agentflow-approvals.csv",
-      response.approvals.map((item) => ({
-        id: item.id,
-        session_id: item.session_id,
-        agent_id: item.agent_id,
-        tool_name: item.tool_name,
-        status: item.status,
-        decided_by: item.decided_by,
-        created_at: item.created_at,
-        decided_at: item.decided_at,
-      }))
-    );
-  };
+
+
 
   return (
     <VStack align="stretch" spacing={7}>
@@ -388,24 +356,10 @@ export const NotificationsPage = () => {
             <Button size="sm" variant="outline" onClick={() => void exportAgentLogs()}>
               Export agent logs
             </Button>
-            <Button size="sm" variant="outline" onClick={() => void exportClassifications()}>
-              Export classifications CSV
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => void exportApprovals()}>
-              Export approvals CSV
-            </Button>
           </HStack>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            alignSelf="start"
-            onClick={() => navigate("/investigation")}
-          >
-            Open investigation for deeper trace analysis
-          </Button>
         </VStack>
       </DetailCard>
     </VStack>
   );
 };
+

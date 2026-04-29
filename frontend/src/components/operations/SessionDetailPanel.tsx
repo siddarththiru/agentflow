@@ -41,7 +41,6 @@ type SessionDetailPanelProps = {
   isLoading?: boolean;
   error?: string | null;
   onOpenApproval?: (sessionId: string) => void;
-  onOpenInvestigation?: (sessionId: string) => void;
   onResume?: () => void;
   showTimeline?: boolean;
 };
@@ -52,7 +51,6 @@ export const SessionDetailPanel = ({
   isLoading,
   error,
   onOpenApproval,
-  onOpenInvestigation,
   onResume,
   showTimeline = true,
 }: SessionDetailPanelProps) => {
@@ -142,11 +140,7 @@ export const SessionDetailPanel = ({
             Open approval record
           </Button>
         ) : null}
-        {onOpenInvestigation ? (
-          <Button size="sm" variant="ghost" onClick={() => onOpenInvestigation(detail.session_id)}>
-            Open in investigation
-          </Button>
-        ) : null}
+
         {detail.status === "paused" && onResume ? (
           <Button size="sm" onClick={onResume}>
             Resume session

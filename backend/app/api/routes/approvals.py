@@ -27,7 +27,6 @@ class ApprovalResponse(BaseModel):
     decided_at: Optional[datetime] = None
     decided_by: Optional[str] = None
     decision_reason: Optional[str] = None
-    risk_level: Optional[str] = None  # From threat classification
     approval_type: str = "Policy Approval"
 
     class Config:
@@ -53,20 +52,6 @@ def _get_approval_or_404(session_id: str, db: Session) -> models.Approval:
         )
     return approval
 
-def _get_threat_classification(session_id: str, db: Session) -> Optional[str]:
-    repo = LogRepository(db)
-    logs, _ = repo.get_logs(
-        session_id=session_id,
-        event_type="threat_classification",
-        limit=1
-    )
-    
-    if logs:
-        latest = logs[0]
-        event_data = latest.event_data
-        return event_data.get("risk_level")
-    
-    return None
 
 
 def _approval_type(approval: models.Approval) -> str:
@@ -122,12 +107,10 @@ def list_approvals(
     
     approvals = db.exec(stmt).all()
     
-    # Enrich with threat classification data
+    # Convert to response model with approval type
     results = []
     for approval in approvals:
-        risk_level = _get_threat_classification(approval.session_id, db)
         result = ApprovalResponse.from_orm(approval)
-        result.risk_level = risk_level
         result.approval_type = _approval_type(approval)
         results.append(result)
     
@@ -144,11 +127,7 @@ def get_approval(
     # Get approval
     approval = _get_approval_or_404(session_id, db)
     
-    # Enrich with threat classification
-    risk_level = _get_threat_classification(session_id, db)
-    
     result = ApprovalResponse.from_orm(approval)
-    result.risk_level = risk_level
     result.approval_type = _approval_type(approval)
     return result
 
@@ -171,9 +150,7 @@ def approve_session(
     
     # Idempotency: if already approved, return current state
     if approval.status == "approved":
-        risk_level = _get_threat_classification(session_id, db)
         result = ApprovalResponse.from_orm(approval)
-        result.risk_level = risk_level
         result.approval_type = _approval_type(approval)
         return result
     
@@ -204,10 +181,8 @@ def approve_session(
         db=db
     )
     
-    # Enrich response
-    risk_level = _get_threat_classification(session_id, db)
+    # Return enriched response
     result = ApprovalResponse.from_orm(approval)
-    result.risk_level = risk_level
     result.approval_type = _approval_type(approval)
     return result
 
@@ -225,9 +200,7 @@ def deny_session(
     
     # Idempotency: if already denied, return current state
     if approval.status == "denied":
-        risk_level = _get_threat_classification(session_id, db)
         result = ApprovalResponse.from_orm(approval)
-        result.risk_level = risk_level
         result.approval_type = _approval_type(approval)
         return result
     
@@ -287,9 +260,7 @@ def deny_session(
     db.add(log)
     db.commit()
     
-    # Enrich response
-    risk_level = _get_threat_classification(session_id, db)
+    # Return enriched response
     result = ApprovalResponse.from_orm(approval)
-    result.risk_level = risk_level
     result.approval_type = _approval_type(approval)
     return result

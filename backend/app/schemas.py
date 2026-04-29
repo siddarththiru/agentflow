@@ -88,8 +88,6 @@ class AgentSummaryRead(BaseModel):
     tools_count: int
     pending_approvals: int
     latest_session_status: Optional[str] = None
-    health_status: str
-    latest_risk_level: Optional[str] = None
     policy: Optional[AgentPolicySummary] = None
 
 
@@ -98,7 +96,6 @@ class AgentRecentSessionRead(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
-    latest_risk_level: Optional[str] = None
 
 
 class AgentRecentApprovalRead(BaseModel):
@@ -110,15 +107,7 @@ class AgentRecentApprovalRead(BaseModel):
     decided_at: Optional[datetime] = None
     decided_by: Optional[str] = None
     decision_reason: Optional[str] = None
-    risk_level: Optional[str] = None
 
-
-class AgentLatestClassificationRead(BaseModel):
-    session_id: str
-    risk_level: Optional[str] = None
-    confidence: Optional[float] = None
-    explanation: Optional[str] = None
-    timestamp: datetime
 
 
 class AgentProfileRead(BaseModel):
@@ -126,12 +115,10 @@ class AgentProfileRead(BaseModel):
     policy: Optional["PolicyRead"] = None
     tools: List["ToolRead"]
     definition: Optional["AgentDefinition"] = None
-    health_status: str
     sessions_count: int
     pending_approvals: int
     recent_sessions: List[AgentRecentSessionRead]
     recent_approvals: List[AgentRecentApprovalRead]
-    latest_classifications: List[AgentLatestClassificationRead]
 
 
 class ToolRead(BaseModel):

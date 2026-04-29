@@ -56,7 +56,6 @@ interface SessionDetailModalProps {
   onClose: () => void;
   size?: string;
   onOpenApproval?: (sessionId: string) => void;
-  onOpenInvestigation?: (sessionId: string) => void;
   onResume?: () => void;
 }
 
@@ -66,7 +65,6 @@ export const SessionDetailModal = ({
   onClose,
   size = "2xl",
   onOpenApproval,
-  onOpenInvestigation,
   onResume,
 }: SessionDetailModalProps) => {
   const navigate = useNavigate();
@@ -226,15 +224,6 @@ export const SessionDetailModal = ({
                       onClick={() => onOpenApproval(detail.session_id)}
                     >
                       Open approval record
-                    </Button>
-                  ) : null}
-                  {onOpenInvestigation ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onOpenInvestigation(detail.session_id)}
-                    >
-                      Open in investigation
                     </Button>
                   ) : null}
                   {detail.status === "paused" && onResume ? (
