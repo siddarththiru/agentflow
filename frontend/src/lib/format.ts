@@ -8,9 +8,10 @@ export const formatDateTime = (value?: string | null): string => {
     return value;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-IE", {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: "Europe/Dublin",
   }).format(date);
 };
 
@@ -24,12 +25,13 @@ export const formatCompactDateTime = (value?: string | null): string => {
     return value;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-IE", {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
+    timeZone: "Europe/Dublin",
   }).format(date);
 };
 
