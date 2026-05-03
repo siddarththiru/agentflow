@@ -24,7 +24,7 @@ const toneForRisk = (risk?: string | null): "success" | "pending" | "warning" | 
 
 export const RiskBadge = ({ risk }: RiskBadgeProps) => {
   if (!risk) {
-    return <StatusBadge status="info" label="Not classified" />;
+    return null;
   }
 
   return <StatusBadge status={toneForRisk(risk)} label={titleCase(risk)} />;
