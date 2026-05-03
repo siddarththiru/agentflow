@@ -63,7 +63,7 @@ export const AppSidebar = () => {
                   <Box
                     as={ItemIcon as any}
                     boxSize={25}
-                    color={isActive ? "brand.200" : "text.muted"}
+                    color={isActive ? "brand.900" : "text.muted"}
                     display={{ base: "none", lg: "inline-flex" }}
                   />
                 }
