@@ -28,3 +28,5 @@ dist/
 build/
 frontend/build/index.html
 frontend/build/asset-manifest.json
+frontend/build/index.html
+frontend/build/asset-manifest.json
