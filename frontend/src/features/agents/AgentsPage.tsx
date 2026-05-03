@@ -81,6 +81,11 @@ export const AgentsPage = () => {
       <PageHeader
         title="Agents"
         description="Browse and manage your conversation agents"
+        actions={
+          <Button colorScheme="brand" onClick={() => navigate("/builder")}>
+            Create an Agent
+          </Button>
+        }
       />
 
       {isLoading ? (

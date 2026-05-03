@@ -324,9 +324,32 @@ export const AgentProfileModal = ({
   };
 
   const handleCopyDefinition = async () => {
-    if (!profile?.definition) return;
+    if (!profile) return;
     try {
-      await navigator.clipboard.writeText(JSON.stringify(profile.definition, null, 2));
+      const exportPayload = {
+        metadata: {
+          name: profile.agent.name,
+          description: profile.agent.description,
+          purpose: profile.agent.purpose,
+          model: profile.agent.model,
+        },
+        tools: profile.tools.map((tool) => ({ id: tool.id, name: tool.name })),
+        policy: {
+          frequency_limit: profile.policy?.frequency_limit || null,
+          require_approval_for_all_tool_calls: profile.policy?.require_approval_for_all_tool_calls || false,
+          intent_guard_enabled: profile.policy?.intent_guard_enabled ?? true,
+          intent_guard_model_mode: profile.policy?.intent_guard_model_mode || "dedicated",
+          intent_guard_model: profile.policy?.intent_guard_model || null,
+          intent_guard_include_conversation: profile.policy?.intent_guard_include_conversation ?? true,
+          intent_guard_include_tool_args: profile.policy?.intent_guard_include_tool_args ?? false,
+          intent_guard_risk_tolerance: profile.policy?.intent_guard_risk_tolerance || "balanced",
+          intent_guard_action_low: profile.policy?.intent_guard_action_low || "ignore",
+          intent_guard_action_medium: profile.policy?.intent_guard_action_medium || "clarify",
+          intent_guard_action_high: profile.policy?.intent_guard_action_high || "pause_for_approval",
+          intent_guard_action_critical: profile.policy?.intent_guard_action_critical || "block",
+        },
+      };
+      await navigator.clipboard.writeText(JSON.stringify(exportPayload, null, 2));
       toast({
         title: "Definition copied",
         status: "success",
@@ -343,8 +366,31 @@ export const AgentProfileModal = ({
   };
 
   const handleExportDefinition = () => {
-    if (!profile?.definition) return;
-    downloadJson(`agent-${profile.agent.id}-definition.json`, profile.definition);
+    if (!profile) return;
+    const exportPayload = {
+      metadata: {
+        name: profile.agent.name,
+        description: profile.agent.description,
+        purpose: profile.agent.purpose,
+        model: profile.agent.model,
+      },
+      tools: profile.tools.map((tool) => ({ id: tool.id, name: tool.name })),
+      policy: {
+        frequency_limit: profile.policy?.frequency_limit || null,
+        require_approval_for_all_tool_calls: profile.policy?.require_approval_for_all_tool_calls || false,
+        intent_guard_enabled: profile.policy?.intent_guard_enabled ?? true,
+        intent_guard_model_mode: profile.policy?.intent_guard_model_mode || "dedicated",
+        intent_guard_model: profile.policy?.intent_guard_model || null,
+        intent_guard_include_conversation: profile.policy?.intent_guard_include_conversation ?? true,
+        intent_guard_include_tool_args: profile.policy?.intent_guard_include_tool_args ?? false,
+        intent_guard_risk_tolerance: profile.policy?.intent_guard_risk_tolerance || "balanced",
+        intent_guard_action_low: profile.policy?.intent_guard_action_low || "ignore",
+        intent_guard_action_medium: profile.policy?.intent_guard_action_medium || "clarify",
+        intent_guard_action_high: profile.policy?.intent_guard_action_high || "pause_for_approval",
+        intent_guard_action_critical: profile.policy?.intent_guard_action_critical || "block",
+      },
+    };
+    downloadJson(`agent-${profile.agent.id}-definition.json`, exportPayload);
     toast({
       title: "Definition exported",
       status: "success",
