@@ -1,8 +1,11 @@
 import { http, parseApiError } from "../../api/http";
 import {
   RunAgentResponse,
+  SessionDetail as SessionDetailType,
   SessionDetail,
   SessionListResponse,
+  SessionMessage,
+  SessionEvent,
   SessionTimelineResponse,
 } from "./types";
 
@@ -11,14 +14,6 @@ type ListSessionParams = {
   status?: string;
   limit?: number;
   offset?: number;
-};
-
-const normalizeOptionalNumber = (value?: string): number | undefined => {
-  if (!value || value.trim().length === 0) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isNaN(parsed) ? undefined : parsed;
 };
 
 export const listSessions = async (params: ListSessionParams): Promise<SessionListResponse> => {
@@ -34,15 +29,53 @@ export const listSessions = async (params: ListSessionParams): Promise<SessionLi
 };
 
 export const getSessionDetail = async (sessionId: string): Promise<SessionDetail> => {
-  // Note: Legacy session detail endpoint removed.
-  // Session details should be fetched from /agents/{agentId}/sessions/{sessionId} or via logs.
-  throw new Error("Session detail endpoint removed. Use agent-specific session endpoints.");
+  const response = await http.get<{
+    session_id: string;
+    agent_id: number;
+    title?: string | null;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    messages: SessionMessage[];
+  }>(`/sessions/${sessionId}`);
+
+  return {
+    session_id: response.data.session_id,
+    agent_id: response.data.agent_id,
+    title: response.data.title ?? null,
+    status: response.data.status,
+    created_at: response.data.created_at,
+    last_updated: response.data.updated_at,
+    messages: response.data.messages || [],
+  } as SessionDetailType;
 };
 
 export const getSessionTimeline = async (sessionId: string): Promise<SessionTimelineResponse> => {
-  // Note: Legacy session timeline endpoint removed.
-  // Timeline events should be fetched from /logs endpoint with session_id filter.
-  throw new Error("Session timeline endpoint removed. Use logs endpoint with session filter.");
+  const response = await http.get<{
+    session_id: string;
+    logs: Array<{
+      id: number;
+      session_id: string;
+      agent_id: number;
+      event_type: string;
+      event_data: Record<string, unknown>;
+      timestamp: string;
+    }>;
+    count: number;
+  }>(`/logs/sessions/${sessionId}`);
+
+  const events: SessionEvent[] = response.data.logs.map((log) => ({
+    timestamp: log.timestamp,
+    event_type: log.event_type,
+    metadata: log.event_data,
+  }));
+
+  return {
+    session_id: response.data.session_id,
+    agent_id: response.data.logs[0]?.agent_id,
+    events,
+    event_count: response.data.count,
+  };
 };
 
 export const resumeAgent = async (sessionId: string): Promise<RunAgentResponse> => {
