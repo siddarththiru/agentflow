@@ -1,5 +1,5 @@
 import { Alert, AlertIcon, HStack, Text, VStack, useToast } from "@chakra-ui/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -41,6 +41,7 @@ const initialDraft: BuilderDraft = {
 export const BuilderPage = () => {
   const toast = useToast();
   const navigate = useNavigate();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [draft, setDraft] = useState<BuilderDraft>(initialDraft);
   const [errors, setErrors] = useState<BuilderValidationErrors>({});
@@ -187,15 +188,135 @@ export const BuilderPage = () => {
     }
   };
 
+  const handleImportJson = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const imported = JSON.parse(content);
+        
+        // Validate the structure has required fields
+        if (!imported.metadata || !imported.policy) {
+          throw new Error("Invalid agent JSON format. Missing metadata or policy.");
+        }
+
+        // Handle both formats: tools array and selectedToolIds
+        let toolIds: number[] = [];
+        if (Array.isArray(imported.tools)) {
+          toolIds = imported.tools
+            .filter((tool: any) => typeof tool.id === "number")
+            .map((tool: any) => tool.id);
+        } else if (Array.isArray(imported.selectedToolIds)) {
+          toolIds = imported.selectedToolIds;
+        }
+
+        // Map snake_case policy keys to camelCase for the builder format
+        const policyKeys = [
+          { from: "frequency_limit", to: "frequencyLimit" },
+          { from: "require_approval_for_all_tool_calls", to: "requireApprovalForAllToolCalls" },
+          { from: "intent_guard_enabled", to: "intentGuardEnabled" },
+          { from: "intent_guard_model_mode", to: "intentGuardModelMode" },
+          { from: "intent_guard_model", to: "intentGuardModel" },
+          { from: "intent_guard_include_conversation", to: "intentGuardIncludeConversation" },
+          { from: "intent_guard_include_tool_args", to: "intentGuardIncludeToolArgs" },
+          { from: "intent_guard_risk_tolerance", to: "intentGuardRiskTolerance" },
+          { from: "intent_guard_action_low", to: "intentGuardActionLow" },
+          { from: "intent_guard_action_medium", to: "intentGuardActionMedium" },
+          { from: "intent_guard_action_high", to: "intentGuardActionHigh" },
+          { from: "intent_guard_action_critical", to: "intentGuardActionCritical" },
+        ];
+
+        const normalizedPolicy: any = {};
+        policyKeys.forEach(({ from, to }) => {
+          const value = imported.policy[from];
+          if (from === "frequency_limit" && value !== null && value !== undefined) {
+            normalizedPolicy[to] = String(value);
+          } else {
+            normalizedPolicy[to] = value;
+          }
+        });
+
+        const normalizedDraft: BuilderDraft = {
+          metadata: {
+            name: imported.metadata.name || "",
+            description: imported.metadata.description || "",
+            purpose: imported.metadata.purpose || "",
+            model: imported.metadata.model || "gemini-2.5-flash",
+          },
+          selectedToolIds: toolIds,
+          policy: {
+            frequencyLimit: normalizedPolicy.frequencyLimit || "",
+            requireApprovalForAllToolCalls: normalizedPolicy.requireApprovalForAllToolCalls ?? false,
+            intentGuardEnabled: normalizedPolicy.intentGuardEnabled ?? true,
+            intentGuardModelMode: normalizedPolicy.intentGuardModelMode || "dedicated",
+            intentGuardModel: normalizedPolicy.intentGuardModel || "gemini-2.5-flash",
+            intentGuardIncludeConversation: normalizedPolicy.intentGuardIncludeConversation ?? true,
+            intentGuardIncludeToolArgs: normalizedPolicy.intentGuardIncludeToolArgs ?? false,
+            intentGuardRiskTolerance: normalizedPolicy.intentGuardRiskTolerance || "balanced",
+            intentGuardActionLow: normalizedPolicy.intentGuardActionLow || "ignore",
+            intentGuardActionMedium: normalizedPolicy.intentGuardActionMedium || "clarify",
+            intentGuardActionHigh: normalizedPolicy.intentGuardActionHigh || "pause_for_approval",
+            intentGuardActionCritical: normalizedPolicy.intentGuardActionCritical || "block",
+          },
+        };
+
+        setDraft(normalizedDraft);
+        setErrors({});
+        setSubmitError(null);
+        setActiveStepIndex(0);
+        
+        toast({
+          title: "Agent imported",
+          description: "Agent configuration loaded successfully.",
+          status: "success",
+          duration: 3000,
+          isClosable: true,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to parse JSON file.";
+        toast({
+          title: "Import failed",
+          description: message,
+          status: "error",
+          duration: 4000,
+          isClosable: true,
+        });
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset input so user can select the same file again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   return (
     <VStack align="stretch" spacing={7}>
       <PageHeader
         title="Builder"
         description="Create a governed agent with clear metadata, controlled tool access, and policy safeguards."
         actions={
-          <Button variant="outline" onClick={() => navigate("/dashboard")}>
-            Back to dashboard
-          </Button>
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleImportJson}
+              style={{ display: "none" }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Import from JSON
+            </Button>
+          </>
         }
       />
 
