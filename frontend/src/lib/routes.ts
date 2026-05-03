@@ -36,5 +36,10 @@ export const navItems: AppNavItem[] = [
     path: "/tools",
     description: "Configure connected toolchains",
   },
+  {
+    label: "Logs",
+    path: "/logs",
+    description: "Inspect and export runtime events",
+  },
 ];
 

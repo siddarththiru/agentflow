@@ -21,6 +21,8 @@ export const getLogs = async (query: {
   sessionId?: string;
   agentId?: string;
   eventType?: string;
+  fromTime?: string;
+  toTime?: string;
   limit?: number;
   offset?: number;
 }): Promise<LogsQueryResponse> => {
@@ -29,6 +31,8 @@ export const getLogs = async (query: {
       session_id: query.sessionId || undefined,
       agent_id: query.agentId ? Number(query.agentId) : undefined,
       event_type: query.eventType || undefined,
+      from_time: query.fromTime || undefined,
+      to_time: query.toTime || undefined,
       limit: query.limit ?? 100,
       offset: query.offset ?? 0,
     },

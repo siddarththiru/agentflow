@@ -8,6 +8,7 @@ import { SessionsPage } from "../features/sessions/SessionsPage";
 import { ApprovalsPage } from "../features/approvals/ApprovalsPage";
 import { NotificationsPage } from "../features/notifications/NotificationsPage";
 import { ToolsPage } from "../features/tools/ToolsPage";
+import { LogsPage } from "../features/logs/LogsPage";
 
 export const AppRouter = () => {
   return (
@@ -22,6 +23,7 @@ export const AppRouter = () => {
         <Route path="approvals" element={<ApprovalsPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="tools" element={<ToolsPage />} />
+        <Route path="logs" element={<LogsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>

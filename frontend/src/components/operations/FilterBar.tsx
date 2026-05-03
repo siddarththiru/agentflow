@@ -1,17 +1,22 @@
-import { Stack, StackProps } from "@chakra-ui/react";
+import { Flex, FlexProps } from "@chakra-ui/react";
 import { ReactNode } from "react";
 import { Surface } from "../ui/Surface";
 
-type FilterBarProps = StackProps & {
+type FilterBarProps = FlexProps & {
   children: ReactNode;
 };
 
 export const FilterBar = ({ children, ...rest }: FilterBarProps) => {
   return (
     <Surface p={4} {...rest}>
-      <Stack direction={{ base: "column", md: "row" }} spacing={3} align={{ base: "stretch", md: "end" }}>
+      <Flex
+        direction={{ base: "column", md: "row" }}
+        gap={3}
+        align={{ base: "stretch", md: "end" }}
+        flexWrap="wrap"
+      >
         {children}
-      </Stack>
+      </Flex>
     </Surface>
   );
 };

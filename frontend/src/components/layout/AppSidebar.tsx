@@ -4,6 +4,7 @@ import {
   FiClipboard,
   FiGrid,
   FiLayers,
+  FiFileText,
   FiSettings,
   FiTool,
 } from "react-icons/fi";
@@ -18,6 +19,7 @@ const navIconMap = {
   "/approvals": FiClipboard,
   "/notifications": FiBell,
   "/tools": FiSettings,
+  "/logs": FiFileText,
 };
 
 export const AppSidebar = () => {
