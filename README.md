@@ -1,5 +1,11 @@
 # AgentFlow
 
+AgentFlow is a full-stack application designed to manage, monitor and interact with automated agents.
+
+It features a FastAPI backend for robust API and data handling, and a modern React frontend for an intuitive user interface. 
+
+The project is modular to make it easy to extend with new features and integrations.
+
 ## Project Structure
 
 - `backend/` - FastAPI backend application
