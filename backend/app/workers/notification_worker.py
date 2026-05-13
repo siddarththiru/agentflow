@@ -146,5 +146,6 @@ class NotificationWorker:
         }
 
 
+    @staticmethod
     def _iso(value: datetime) -> str:
         return value.isoformat()
