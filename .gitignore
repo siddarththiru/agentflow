@@ -30,3 +30,9 @@ frontend/build/index.html
 frontend/build/asset-manifest.json
 frontend/build/index.html
 frontend/build/asset-manifest.json
+
+# Test and coverage artifacts
+.coverage
+.coverage.*
+frontend/playwright-report/
+frontend/test-results/
