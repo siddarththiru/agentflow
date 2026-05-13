@@ -1,0 +1,82 @@
+flowchart LR
+    User["User"]
+
+    subgraph Frontend["Frontend"]
+        UI["React Frontend<br/><span style='font-size:12px'>AgentFlow Console</span>"]
+    end
+
+    subgraph Backend["FastAPI Backend"]
+        direction TB
+
+        API["REST API"]
+
+        subgraph Services["Core Backend Services"]
+            direction TB
+            AgentService["Agent Service<br/><span style='font-size:12px'>Create and manage agents</span>"]
+            Runtime["Agent Runtime<br/><span style='font-size:12px'>Execute chat sessions</span>"]
+            Governance["Governance Layer<br/><span style='font-size:12px'>Intent guard, policies, approvals</span>"]
+            Observability["Observability Layer<br/><span style='font-size:12px'>Logs, timeline, notifications</span>"]
+        end
+
+        API --> AgentService
+        API --> Runtime
+        API --> Governance
+        API --> Observability
+    end
+
+    subgraph Storage["Persistence"]
+        DB[("SQLite Database")]
+    end
+
+    subgraph External["External Integrations"]
+        LLM["LLM Provider<br/><span style='font-size:12px'>Gemini model</span>"]
+        Tools["Tool Adapter Layer<br/><span style='font-size:12px'>Registered tools</span>"]
+    end
+
+    subgraph Review["Human Review"]
+        Approvals["Human Approval Queue"]
+    end
+
+    subgraph Audit["Monitoring and Audit"]
+        Dashboard["Dashboard<br/><span style='font-size:12px'>Logs, events, notifications</span>"]
+    end
+
+    User --> UI
+    UI --> API
+
+    AgentService --> DB
+    
+    Runtime --> Tools
+    Runtime --> LLM
+    Runtime --> DB
+    
+    Governance --> DB
+    Governance --> Approvals
+    
+    Observability --> DB
+    Observability --> Dashboard
+
+    Approvals -. "approval status" .-> UI
+    Dashboard -. "updates" .-> UI
+
+    classDef user fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+    classDef frontendNode fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#1e3a8a;
+    classDef backendNode fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d;
+    classDef storageNode fill:#ede9fe,stroke:#7c3aed,stroke-width:1.5px,color:#3b0764;
+    classDef externalNode fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#7f1d1d;
+    classDef monitorNode fill:#fef9c3,stroke:#ca8a04,stroke-width:1.5px,color:#713f12;
+
+    class User user;
+    class UI frontendNode;
+    class API,AgentService,Runtime,Governance,Observability backendNode;
+    class DB storageNode;
+    class LLM,Tools,Approvals externalNode;
+    class Dashboard monitorNode;
+
+    style Frontend fill:#f8fbff,stroke:#93c5fd,stroke-width:1.5px
+    style Backend fill:#f6fff8,stroke:#86efac,stroke-width:1.5px
+    style Services fill:#ffffff,stroke:#bbf7d0,stroke-width:1px
+    style Storage fill:#faf7ff,stroke:#c4b5fd,stroke-width:1.5px
+    style External fill:#fffafa,stroke:#fecaca,stroke-width:1.5px
+    style Review fill:#fffaf0,stroke:#fed7aa,stroke-width:1.5px
+    style Audit fill:#fffdf2,stroke:#fde68a,stroke-width:1.5px
